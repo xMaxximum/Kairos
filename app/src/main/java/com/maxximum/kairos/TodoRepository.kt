@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 
 class TodoRepository(private val todoDao: TodoDao) {
     val allTodos: Flow<List<Todo>> = todoDao.getAllTodos()
+    fun observeTodoById(id: Int): Flow<Todo?> = todoDao.observeTodoById(id)
 
     suspend fun getTodoById(id: Int): Todo? = todoDao.getTodoById(id)
 

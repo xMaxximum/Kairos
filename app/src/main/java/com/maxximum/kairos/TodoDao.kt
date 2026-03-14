@@ -11,6 +11,9 @@ interface TodoDao {
     @Query("SELECT * FROM todos WHERE id = :id")
     suspend fun getTodoById(id: Int): Todo?
 
+    @Query("SELECT * FROM todos WHERE id = :id")
+    fun observeTodoById(id: Int): Flow<Todo?>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTodo(todo: Todo): Long
 

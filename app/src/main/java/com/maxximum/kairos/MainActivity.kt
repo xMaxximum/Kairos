@@ -18,6 +18,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -87,6 +88,8 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(Unit) {
                         permissionLauncher.launch(permissionsToRequest.toTypedArray())
                         checkExactAlarmPermission(context)
+                        val hours = NotificationPreferences.getOverdueIntervalHours(context)
+                        OverdueNotificationWorker.schedule(context, hours)
                     }
                     
                     TodoNavHost(viewModel = viewModel, initialTodoId = todoIdFromIntent)
@@ -458,16 +461,37 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
         }.sortedBy { it.reminderTime ?: Long.MAX_VALUE }
     }
 
+    val overdueCount = remember(filteredTodos) {
+        val now = System.currentTimeMillis()
+        filteredTodos.count { !it.isCompleted && !it.isArchived && it.reminderTime != null && it.reminderTime < now }
+    }
+
+    val useGroupedView = currentFilter == TodoFilter.ALL || currentFilter == TodoFilter.PENDING
+    val todoSections = remember(filteredTodos, useGroupedView) {
+        if (useGroupedView) groupTodosByDate(filteredTodos) else null
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
+            var showSettings by remember { mutableStateOf(false) }
+            if (showSettings) {
+                SettingsDialog(onDismiss = { showSettings = false })
+            }
             TopAppBar(
                 title = { 
                     Column {
                         if (isSelectionMode) {
                             Text("${selectedTodos.size} selected")
                         } else {
-                            Text("Your Tasks")
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Your Tasks")
+                                if (overdueCount > 0) {
+                                    Badge(containerColor = Color(0xFFD32F2F)) {
+                                        Text("$overdueCount", color = Color.White)
+                                    }
+                                }
+                            }
                             Text(currentFilter.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
@@ -491,6 +515,9 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
                             isSelectionMode = false; selectedTodos = emptySet()
                         }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                     } else {
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
                         var expanded by remember { mutableStateOf(false) }
                         IconButton(onClick = { expanded = true }) { Icon(Icons.Default.FilterList, null) }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -511,22 +538,51 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.padding(innerPadding).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(bottom = 16.dp)
         ) {
-            items(filteredTodos, key = { it.id }) { todo ->
-                TodoItem(
-                    todo = todo,
-                    isSelected = todo.id in selectedTodos,
-                    onToggleComplete = { viewModel.update(todo.copy(isCompleted = !todo.isCompleted)) },
-                    onClick = { 
-                        if (isSelectionMode) {
-                            selectedTodos = if (todo.id in selectedTodos) selectedTodos - todo.id else selectedTodos + todo.id
-                            if (selectedTodos.isEmpty()) isSelectionMode = false
-                        } else onTodoClick(todo.id)
-                    },
-                    onLongClick = { isSelectionMode = true; selectedTodos = selectedTodos + todo.id }
-                )
+            if (todoSections != null) {
+                todoSections.forEach { section ->
+                    stickyHeader(key = "header_${section.label}") {
+                        TodoSectionHeader(
+                            label = section.label,
+                            count = section.todos.size,
+                            isOverdue = section.label == "Overdue"
+                        )
+                    }
+                    items(section.todos, key = { it.id }) { todo ->
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                            TodoItem(
+                                todo = todo,
+                                isSelected = todo.id in selectedTodos,
+                                onToggleComplete = { viewModel.update(todo.copy(isCompleted = !todo.isCompleted)) },
+                                onClick = {
+                                    if (isSelectionMode) {
+                                        selectedTodos = if (todo.id in selectedTodos) selectedTodos - todo.id else selectedTodos + todo.id
+                                        if (selectedTodos.isEmpty()) isSelectionMode = false
+                                    } else onTodoClick(todo.id)
+                                },
+                                onLongClick = { isSelectionMode = true; selectedTodos = selectedTodos + todo.id }
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(filteredTodos, key = { it.id }) { todo ->
+                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                        TodoItem(
+                            todo = todo,
+                            isSelected = todo.id in selectedTodos,
+                            onToggleComplete = { viewModel.update(todo.copy(isCompleted = !todo.isCompleted)) },
+                            onClick = {
+                                if (isSelectionMode) {
+                                    selectedTodos = if (todo.id in selectedTodos) selectedTodos - todo.id else selectedTodos + todo.id
+                                    if (selectedTodos.isEmpty()) isSelectionMode = false
+                                } else onTodoClick(todo.id)
+                            },
+                            onLongClick = { isSelectionMode = true; selectedTodos = selectedTodos + todo.id }
+                        )
+                    }
+                }
             }
         }
     }
@@ -535,20 +591,54 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TodoItem(todo: Todo, isSelected: Boolean, onToggleComplete: () -> Unit, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val now = System.currentTimeMillis()
+    val isOverdue = !todo.isCompleted && todo.reminderTime != null && todo.reminderTime < now
+    val overdueColor = Color(0xFFD32F2F)
+
     Card(
-        modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .then(
+                if (isOverdue) Modifier.border(1.5.dp, overdueColor, RoundedCornerShape(16.dp))
+                else Modifier
+            ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+            containerColor = when {
+                isSelected -> MaterialTheme.colorScheme.primaryContainer
+                isOverdue -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
         )
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (isOverdue) {
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .height(44.dp)
+                        .background(overdueColor, RoundedCornerShape(2.dp))
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
             Checkbox(checked = todo.isCompleted, onCheckedChange = { onToggleComplete() })
             Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
-                Text(todo.title, style = MaterialTheme.typography.titleLarge, textDecoration = if (todo.isCompleted) TextDecoration.LineThrough else null)
+                Text(
+                    todo.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    textDecoration = if (todo.isCompleted) TextDecoration.LineThrough else null
+                )
+                if (todo.isHighPriority && !todo.isCompleted) {
+                    Text("High Priority", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFF6D00))
+                }
                 if (todo.reminderTime != null) {
                     val date = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(todo.reminderTime))
-                    Text("Reminder: $date", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        if (isOverdue) "Overdue: $date" else "Reminder: $date",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isOverdue) overdueColor else MaterialTheme.colorScheme.primary
+                    )
                 }
             }
             if (todo.isArchived) {
@@ -561,7 +651,7 @@ fun TodoItem(todo: Todo, isSelected: Boolean, onToggleComplete: () -> Unit, onCl
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) {
-    var todo by remember { mutableStateOf<Todo?>(null) }
+    val todo by viewModel.observeTodoById(todoId).collectAsState(initial = null)
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -576,15 +666,13 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
             val updatedAttachments = currentTodo.attachments + uris.map { it.toString() }
             val updatedTodo = currentTodo.copy(attachments = updatedAttachments)
             viewModel.update(updatedTodo)
-            todo = updatedTodo
             if (uris.isNotEmpty()) {
                 ToastUtils.show(context, "${uris.size} attachment(s) added")
             }
         }
     }
 
-    LaunchedEffect(todoId) {
-        todo = viewModel.getTodoById(todoId)
+    LaunchedEffect(todo?.id) {
         titleDraft = todo?.title.orEmpty()
         descriptionDraft = todo?.description.orEmpty()
     }
@@ -597,7 +685,6 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
         if (titleDraft != latest.title && titleDraft.isNotBlank()) {
             val updated = latest.copy(title = titleDraft)
             viewModel.update(updated)
-            todo = updated
             ToastUtils.show(context, "Title updated")
         }
     }
@@ -610,7 +697,6 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
         if (descriptionDraft != latest.description) {
             val updated = latest.copy(description = descriptionDraft)
             viewModel.update(updated)
-            todo = updated
             ToastUtils.show(context, "Description saved")
         }
     }
@@ -625,7 +711,6 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                         IconButton(onClick = {
                             val updated = currentTodo.copy(isArchived = !currentTodo.isArchived)
                             viewModel.update(updated)
-                            todo = updated
                             ToastUtils.show(context, if (updated.isArchived) "Archived" else "Unarchived")
                         }) { Icon(if (currentTodo.isArchived) Icons.Default.Unarchive else Icons.Default.Archive, null) }
                         
@@ -655,7 +740,6 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                     Checkbox(checked = currentTodo.isCompleted, onCheckedChange = { 
                         val updated = currentTodo.copy(isCompleted = it)
                         viewModel.update(updated)
-                        todo = updated
                         ToastUtils.show(context, if (it) "Task completed" else "Task marked pending")
                     })
                     OutlinedTextField(
@@ -674,7 +758,6 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                         onCheckedChange = {
                             val updated = currentTodo.copy(isHighPriority = it)
                             viewModel.update(updated)
-                            todo = updated
                             ToastUtils.show(context, if (it) "High priority enabled" else "Low priority")
                         }
                     )
@@ -711,7 +794,6 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                             AttachmentItem(uriStr = uriStr, onRemove = {
                                 val updated = currentTodo.copy(attachments = currentTodo.attachments - uriStr)
                                 viewModel.update(updated)
-                                todo = updated
                                 ToastUtils.show(context, "Attachment removed")
                             })
                         }
@@ -723,6 +805,48 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                 }
                 
                 Spacer(modifier = Modifier.weight(1f))
+
+                val now = System.currentTimeMillis()
+                val scheduledTime = currentTodo.reminderTime
+                val scheduledText = scheduledTime?.let {
+                    SimpleDateFormat("EEEE, MMM dd yyyy, HH:mm", Locale.getDefault()).format(Date(it))
+                } ?: "Not scheduled"
+                val isOverdueReminder = scheduledTime != null && !currentTodo.isCompleted && scheduledTime < now
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isOverdueReminder) {
+                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.NotificationsActive,
+                            contentDescription = null,
+                            tint = if (isOverdueReminder) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Scheduled for", style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                text = if (isOverdueReminder) "Overdue · $scheduledText" else scheduledText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isOverdueReminder) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
                 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = {
@@ -736,11 +860,24 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                             val updated = currentTodo.copy(reminderTime = it)
                             viewModel.update(updated)
                             AlarmScheduler.schedule(context, updated)
-                            todo = updated
                             ToastUtils.show(context, "Reminder set")
                         }
                     }, modifier = Modifier.weight(1f)) {
                         Icon(Icons.Default.EditCalendar, null); Spacer(Modifier.width(4.dp)); Text("Custom")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            AlarmScheduler.cancel(context, currentTodo)
+                            viewModel.update(currentTodo.copy(reminderTime = null))
+                            ToastUtils.show(context, "Reminder cleared")
+                        },
+                        enabled = currentTodo.reminderTime != null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Close, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Clear")
                     }
                 }
 
@@ -776,7 +913,6 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                                     val updated = currentTodo.copy(reminderTime = updatedTime)
                                     viewModel.update(updated)
                                     AlarmScheduler.schedule(context, updated)
-                                    todo = updated
                                     ToastUtils.show(context, "Reminder set")
                                     showTimePickerDialog = false
                                 },
@@ -879,4 +1015,126 @@ object ToastUtils {
     fun show(context: android.content.Context, message: String) {
         android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
     }
+}
+
+// ── Date grouping ─────────────────────────────────────────────────────────────
+
+data class TodoSection(val label: String, val todos: List<Todo>)
+
+fun groupTodosByDate(todos: List<Todo>): List<TodoSection> {
+    val cal = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    val startOfToday = cal.timeInMillis
+    val startOfTomorrow = startOfToday + 86_400_000L
+    val startOfDayAfterTomorrow = startOfTomorrow + 86_400_000L
+    val startOfNextWeek = startOfToday + 7 * 86_400_000L
+
+    val overdue = todos.filter { it.reminderTime != null && it.reminderTime < startOfToday }
+    val today = todos.filter { it.reminderTime != null && it.reminderTime in startOfToday until startOfTomorrow }
+    val tomorrow = todos.filter { it.reminderTime != null && it.reminderTime in startOfTomorrow until startOfDayAfterTomorrow }
+    val thisWeek = todos.filter { it.reminderTime != null && it.reminderTime in startOfDayAfterTomorrow until startOfNextWeek }
+    val later = todos.filter { it.reminderTime != null && it.reminderTime >= startOfNextWeek }
+    val noDate = todos.filter { it.reminderTime == null }
+
+    return buildList {
+        if (overdue.isNotEmpty()) add(TodoSection("Overdue", overdue))
+        if (today.isNotEmpty()) add(TodoSection("Today", today))
+        if (tomorrow.isNotEmpty()) add(TodoSection("Tomorrow", tomorrow))
+        if (thisWeek.isNotEmpty()) add(TodoSection("This Week", thisWeek))
+        if (later.isNotEmpty()) add(TodoSection("Later", later))
+        if (noDate.isNotEmpty()) add(TodoSection("No Due Date", noDate))
+    }
+}
+
+@Composable
+fun TodoSectionHeader(label: String, count: Int, isOverdue: Boolean) {
+    val accentColor = if (isOverdue) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = label.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = accentColor,
+                fontWeight = FontWeight.Bold
+            )
+            Badge(containerColor = accentColor) {
+                Text("$count", color = Color.White)
+            }
+        }
+    }
+}
+
+// ── Settings dialog ───────────────────────────────────────────────────────────
+
+@Composable
+fun SettingsDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var intervalHours by remember {
+        mutableIntStateOf(NotificationPreferences.getOverdueIntervalHours(context))
+    }
+    val options = listOf(0, 1, 2, 3, 4, 6, 8, 12, 24)
+    val optionRows = options.chunked(5)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Notification Settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Remind me of pending tasks every:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    optionRows.forEach { rowItems ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            rowItems.forEach { h ->
+                                FilterChip(
+                                    selected = intervalHours == h,
+                                    onClick = { intervalHours = h },
+                                    label = {
+                                        Text(
+                                            when (h) {
+                                                0 -> "Off"
+                                                1 -> "1 hr"
+                                                else -> "$h hrs"
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    if (intervalHours == 0)
+                        "Periodic notifications are disabled."
+                    else
+                        "You'll be notified every $intervalHours hour${if (intervalHours > 1) "s" else ""} when you have pending tasks.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                NotificationPreferences.setOverdueIntervalHours(context, intervalHours)
+                OverdueNotificationWorker.schedule(context, intervalHours)
+                onDismiss()
+            }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

@@ -69,4 +69,8 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun getTodoById(id: Int): Todo? {
         return repository.getTodoById(id)
     }
+
+    fun observeTodoById(id: Int): Flow<Todo?> {
+        return repository.observeTodoById(id)
+    }
 }
