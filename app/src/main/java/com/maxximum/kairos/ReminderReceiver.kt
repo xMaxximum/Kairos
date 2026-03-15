@@ -27,6 +27,8 @@ class ReminderReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_MARK_DONE -> {
                 markAsDone(context, todoId)
+                val taskTitle = intent.getStringExtra("todo_title")?.takeIf { it.isNotBlank() }
+                ToastUtils.show(context, if (taskTitle != null) "Completed: $taskTitle" else "Task completed")
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.cancel(todoId)
             }
@@ -86,6 +88,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val doneIntent = Intent(context, ReminderReceiver::class.java).apply {
             action = ACTION_MARK_DONE
             putExtra("todo_id", todoId)
+            putExtra("todo_title", title)
         }
         val donePendingIntent = PendingIntent.getBroadcast(
             context, todoId + 100, doneIntent,

@@ -41,16 +41,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -154,26 +149,6 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
         scope.launch { pagerState.animateScrollToPage(0) }
     }
 
-    val pagerSwipeLock = remember(pagerState) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                return if (pagerState.settledPage == 1 && available.x < 0f) {
-                    Offset(x = available.x, y = 0f)
-                } else {
-                    Offset.Zero
-                }
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                return if (pagerState.settledPage == 1 && available.x < 0f) {
-                    Velocity(x = available.x, y = 0f)
-                } else {
-                    Velocity.Zero
-                }
-            }
-        }
-    }
-
     LaunchedEffect(pagerState.settledPage) {
         if (pagerState.settledPage == 2 && !allowDetailFromClick) {
             scope.launch { pagerState.animateScrollToPage(1) }
@@ -186,11 +161,8 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
     HorizontalPager(
         state = pagerState,
         userScrollEnabled = true,
-        pageNestedScrollConnection = pagerSwipeLock,
         beyondViewportPageCount = 1,
-        modifier = Modifier
-            .fillMaxSize()
-            .nestedScroll(pagerSwipeLock)
+        modifier = Modifier.fillMaxSize()
     ) { page ->
         when (page) {
             0 -> AddTodoScreen(
@@ -656,6 +628,7 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var showTimePickerDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var titleDraft by remember { mutableStateOf("") }
     var descriptionDraft by remember { mutableStateOf("") }
 
@@ -714,11 +687,9 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                             ToastUtils.show(context, if (updated.isArchived) "Archived" else "Unarchived")
                         }) { Icon(if (currentTodo.isArchived) Icons.Default.Unarchive else Icons.Default.Archive, null) }
                         
-                        IconButton(onClick = {
-                            viewModel.delete(currentTodo)
-                            ToastUtils.show(context, "Task deleted")
-                            onBack()
-                        }) { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }
+                        IconButton(onClick = { showDeleteConfirm = true }) {
+                            Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                        }
                     }
                 )
             }
@@ -919,6 +890,29 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                                 modifier = Modifier.widthIn(min = 72.dp)
                             ) {
                                 Text("OK")
+                            }
+                        }
+                    )
+                }
+
+                if (showDeleteConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showDeleteConfirm = false },
+                        title = { Text("Delete task") },
+                        text = { Text("Are you sure you want to delete this task?") },
+                        dismissButton = {
+                            TextButton(onClick = { showDeleteConfirm = false }) {
+                                Text(stringResource(android.R.string.cancel))
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showDeleteConfirm = false
+                                viewModel.delete(currentTodo)
+                                ToastUtils.show(context, "Task deleted")
+                                onBack()
+                            }) {
+                                Text("Delete")
                             }
                         }
                     )
