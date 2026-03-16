@@ -1033,7 +1033,7 @@ fun groupTodosByDate(todos: List<Todo>): List<TodoSection> {
     val startOfDayAfterTomorrow = startOfTomorrow + 86_400_000L
     val startOfNextWeek = startOfToday + 7 * 86_400_000L
 
-    val overdue = todos.filter { it.reminderTime != null && it.reminderTime < startOfToday }
+    val overdue = todos.filter { !it.isCompleted && it.reminderTime != null && it.reminderTime < startOfToday }
     val today = todos.filter { it.reminderTime != null && it.reminderTime in startOfToday until startOfTomorrow }
     val tomorrow = todos.filter { it.reminderTime != null && it.reminderTime in startOfTomorrow until startOfDayAfterTomorrow }
     val thisWeek = todos.filter { it.reminderTime != null && it.reminderTime in startOfDayAfterTomorrow until startOfNextWeek }
