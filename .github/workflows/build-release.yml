@@ -76,6 +76,5 @@ jobs:
             
             Download the APK below to install directly on your device.
           files: app/build/outputs/apk/release/Kairos.apk
-          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
