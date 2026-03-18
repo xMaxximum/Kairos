@@ -5,6 +5,7 @@ import android.app.AlarmManager
 import android.app.DatePickerDialog
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -217,6 +218,9 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
     
     val focusRequester = remember { FocusRequester() }
     val context = LocalContext.current
+    val isDebugBuild = remember(context) {
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -231,7 +235,7 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("Kairos", fontWeight = FontWeight.Bold)
-                        if (BuildConfig.DEBUG) {
+                        if (isDebugBuild) {
                             DebugBuildBadge()
                         }
                     }
@@ -1084,6 +1088,9 @@ fun TodoSectionHeader(label: String, count: Int, isOverdue: Boolean) {
 @Composable
 fun SettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val isDebugBuild = remember(context) {
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
     var intervalHours by remember {
         mutableIntStateOf(NotificationPreferences.getOverdueIntervalHours(context))
     }
@@ -1098,7 +1105,7 @@ fun SettingsDialog(onDismiss: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text("Notification Settings")
-                if (BuildConfig.DEBUG) {
+                if (isDebugBuild) {
                     DebugBuildBadge()
                 }
             }
