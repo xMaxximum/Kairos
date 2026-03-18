@@ -225,7 +225,17 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Kairos", fontWeight = FontWeight.Bold) },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Kairos", fontWeight = FontWeight.Bold)
+                        if (BuildConfig.DEBUG) {
+                            DebugBuildBadge()
+                        }
+                    }
+                },
                 actions = {
                     IconButton(onClick = onViewAll) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = "View All")
@@ -1082,7 +1092,17 @@ fun SettingsDialog(onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Notification Settings") },
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Notification Settings")
+                if (BuildConfig.DEBUG) {
+                    DebugBuildBadge()
+                }
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -1131,4 +1151,20 @@ fun SettingsDialog(onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+fun DebugBuildBadge() {
+    Surface(
+        color = Color(0xFF8B0000),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Text(
+            text = "DEBUG",
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold
+        )
+    }
 }

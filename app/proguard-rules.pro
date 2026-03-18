@@ -19,3 +19,11 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep metadata commonly needed by Room and JSON parsing in release builds.
+-keepattributes Signature,*Annotation*
+
+# Keep Room database/DAO/entity classes.
+-keep class com.maxximum.kairos.AppDatabase { *; }
+-keep class com.maxximum.kairos.TodoDao { *; }
+-keep class com.maxximum.kairos.Todo { *; }

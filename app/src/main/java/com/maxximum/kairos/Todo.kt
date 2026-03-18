@@ -3,8 +3,7 @@ package com.maxximum.kairos
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import org.json.JSONArray
 
 @Entity(tableName = "todos")
 data class Todo(
@@ -23,12 +22,21 @@ data class Todo(
 class Converters {
     @TypeConverter
     fun fromString(value: String): List<String> {
-        val listType = object : TypeToken<List<String>>() {}.type
-        return Gson().fromJson(value, listType) ?: emptyList()
+        if (value.isBlank()) return emptyList()
+        return try {
+            val jsonArray = JSONArray(value)
+            buildList(jsonArray.length()) {
+                for (i in 0 until jsonArray.length()) {
+                    add(jsonArray.optString(i))
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     @TypeConverter
     fun fromList(list: List<String>): String {
-        return Gson().toJson(list)
+        return JSONArray(list).toString()
     }
 }

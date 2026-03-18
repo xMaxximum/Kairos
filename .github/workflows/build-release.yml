@@ -25,8 +25,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Gradle Cache
-        uses: gradle/gradle-build-action@v3
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -54,7 +54,7 @@ jobs:
 
       - name: Rename APK
         run: |
-          cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Kairos.apk
+          mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Kairos.apk
 
       - name: Upload APK to artifacts
         uses: actions/upload-artifact@v4
