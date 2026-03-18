@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -20,6 +24,9 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      - name: Setup Gradle Cache
+        uses: gradle/gradle-build-action@v3
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
