@@ -1,8 +1,20 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
+
+// Load version from properties file
+val versionPropsFile = file("../version.properties")
+val versionProperties = Properties()
+if (versionPropsFile.exists()) {
+    versionProperties.load(FileInputStream(versionPropsFile))
+}
+val currentVersionCode = (versionProperties["versionCode"] as String).toInt()
+val currentVersionName = versionProperties["versionName"] as String? ?: "0.1.0"
 
 android {
     namespace = "com.maxximum.kairos"
@@ -12,15 +24,28 @@ android {
         applicationId = "com.maxximum.kairos"
         minSdk = 34
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = currentVersionCode
+        versionName = currentVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../maxximum.keystore")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: "maxximum_key"
+            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+        }
+    }
+
     buildTypes {
-        release {
+        debug {
             isMinifyEnabled = false
+        }
+        release {
+            isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -71,4 +96,38 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+// Task to auto-increment version code and patch version
+tasks.register("incrementVersionCode") {
+    doLast {
+        val versionPropsFile = file("../version.properties")
+        val versionProperties = Properties()
+        if (versionPropsFile.exists()) {
+            versionProperties.load(FileInputStream(versionPropsFile))
+        }
+        
+        // Increment patch version (last number in semantic versioning)
+        val currentVersionName = versionProperties["versionName"] as String? ?: "0.1.0"
+        val versionParts = currentVersionName.split(".").toMutableList()
+        val patch = versionParts.last().toInt()
+        versionParts[versionParts.size - 1] = (patch + 1).toString()
+        val newVersionName = versionParts.joinToString(".")
+        
+        // Increment versionCode
+        val currentCode = (versionProperties["versionCode"] as String).toInt()
+        val newCode = currentCode + 1
+        
+        versionProperties["versionName"] = newVersionName
+        versionProperties["versionCode"] = newCode.toString()
+        versionProperties.store(versionPropsFile.outputStream(), "Auto-incremented version")
+        println("Version incremented: $currentVersionName -> $newVersionName (code: $currentCode -> $newCode)")
+    }
+}
+
+// Hook the increment task to run after assembleRelease (after Android plugin creates tasks)
+afterEvaluate {
+    tasks.named("assembleRelease").configure {
+        finalizedBy("incrementVersionCode")
+    }
 }
