@@ -5,7 +5,7 @@ import android.content.Context
 object NotificationPreferences {
     private const val PREFS_NAME = "kairos_prefs"
     private const val KEY_OVERDUE_INTERVAL_HOURS = "overdue_interval_hours"
-    const val DEFAULT_INTERVAL_HOURS = 4
+    const val DEFAULT_INTERVAL_HOURS = 0
 
     fun getOverdueIntervalHours(context: Context): Int {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

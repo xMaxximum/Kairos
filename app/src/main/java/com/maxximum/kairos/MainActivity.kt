@@ -161,7 +161,7 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
 
     HorizontalPager(
         state = pagerState,
-        userScrollEnabled = true,
+        userScrollEnabled = pagerState.currentPage != 2,
         beyondViewportPageCount = 1,
         modifier = Modifier.fillMaxSize()
     ) { page ->
@@ -413,6 +413,12 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
     var selectedTodos by remember { mutableStateOf(setOf<Int>()) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var currentFilter by remember { mutableStateOf(TodoFilter.ALL) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
+
+    if (showSettingsScreen) {
+        SettingsScreen(onBack = { showSettingsScreen = false })
+        return
+    }
     
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -460,10 +466,6 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            var showSettings by remember { mutableStateOf(false) }
-            if (showSettings) {
-                SettingsDialog(onDismiss = { showSettings = false })
-            }
             TopAppBar(
                 title = { 
                     Column {
@@ -501,7 +503,7 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
                             isSelectionMode = false; selectedTodos = emptySet()
                         }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                     } else {
-                        IconButton(onClick = { showSettings = true }) {
+                        IconButton(onClick = { showSettingsScreen = true }) {
                             Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
                         var expanded by remember { mutableStateOf(false) }
@@ -1041,12 +1043,15 @@ fun groupTodosByDate(todos: List<Todo>): List<TodoSection> {
     val startOfDayAfterTomorrow = startOfTomorrow + 86_400_000L
     val startOfNextWeek = startOfToday + 7 * 86_400_000L
 
-    val overdue = todos.filter { !it.isCompleted && it.reminderTime != null && it.reminderTime < startOfToday }
-    val today = todos.filter { it.reminderTime != null && it.reminderTime in startOfToday until startOfTomorrow }
-    val tomorrow = todos.filter { it.reminderTime != null && it.reminderTime in startOfTomorrow until startOfDayAfterTomorrow }
-    val thisWeek = todos.filter { it.reminderTime != null && it.reminderTime in startOfDayAfterTomorrow until startOfNextWeek }
-    val later = todos.filter { it.reminderTime != null && it.reminderTime >= startOfNextWeek }
-    val noDate = todos.filter { it.reminderTime == null }
+    val pending = todos.filter { !it.isCompleted }
+    val done = todos.filter { it.isCompleted }.sortedByDescending { it.timestamp }
+
+    val overdue = pending.filter { it.reminderTime != null && it.reminderTime < startOfToday }
+    val today = pending.filter { it.reminderTime != null && it.reminderTime in startOfToday until startOfTomorrow }
+    val tomorrow = pending.filter { it.reminderTime != null && it.reminderTime in startOfTomorrow until startOfDayAfterTomorrow }
+    val thisWeek = pending.filter { it.reminderTime != null && it.reminderTime in startOfDayAfterTomorrow until startOfNextWeek }
+    val later = pending.filter { it.reminderTime != null && it.reminderTime >= startOfNextWeek }
+    val noDate = pending.filter { it.reminderTime == null }
 
     return buildList {
         if (overdue.isNotEmpty()) add(TodoSection("Overdue", overdue))
@@ -1055,6 +1060,7 @@ fun groupTodosByDate(todos: List<Todo>): List<TodoSection> {
         if (thisWeek.isNotEmpty()) add(TodoSection("This Week", thisWeek))
         if (later.isNotEmpty()) add(TodoSection("Later", later))
         if (noDate.isNotEmpty()) add(TodoSection("No Due Date", noDate))
+        if (done.isNotEmpty()) add(TodoSection("Done", done))
     }
 }
 
@@ -1083,10 +1089,11 @@ fun TodoSectionHeader(label: String, count: Int, isOverdue: Boolean) {
     }
 }
 
-// ── Settings dialog ───────────────────────────────────────────────────────────
+// ── Settings screen ───────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsDialog(onDismiss: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val isDebugBuild = remember(context) {
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -1095,69 +1102,96 @@ fun SettingsDialog(onDismiss: () -> Unit) {
         mutableIntStateOf(NotificationPreferences.getOverdueIntervalHours(context))
     }
     val options = listOf(0, 1, 2, 3, 4, 6, 8, 12, 24)
-    val optionRows = options.chunked(5)
+    val optionRows = options.chunked(3)
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("Notification Settings")
-                if (isDebugBuild) {
-                    DebugBuildBadge()
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Notification Settings")
+                        if (isDebugBuild) {
+                            DebugBuildBadge()
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        },
+        bottomBar = {
+            Surface(tonalElevation = 4.dp) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Button(onClick = {
+                        NotificationPreferences.setOverdueIntervalHours(context, intervalHours)
+                        OverdueNotificationWorker.schedule(context, intervalHours)
+                        onBack()
+                    }) {
+                        Text("Save")
+                    }
                 }
             }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Remind me of pending tasks every:",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    optionRows.forEach { rowItems ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            rowItems.forEach { h ->
-                                FilterChip(
-                                    selected = intervalHours == h,
-                                    onClick = { intervalHours = h },
-                                    label = {
-                                        Text(
-                                            when (h) {
-                                                0 -> "Off"
-                                                1 -> "1 hr"
-                                                else -> "$h hrs"
-                                            }
-                                        )
-                                    }
-                                )
-                            }
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "Remind me of pending tasks every:",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                optionRows.forEach { rowItems ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowItems.forEach { h ->
+                            FilterChip(
+                                selected = intervalHours == h,
+                                onClick = { intervalHours = h },
+                                label = {
+                                    Text(
+                                        when (h) {
+                                            0 -> "Off"
+                                            1 -> "1 hr"
+                                            else -> "$h hrs"
+                                        }
+                                    )
+                                }
+                            )
                         }
                     }
                 }
-                Text(
-                    if (intervalHours == 0)
-                        "Periodic notifications are disabled."
-                    else
-                        "You'll be notified every $intervalHours hour${if (intervalHours > 1) "s" else ""} when you have pending tasks.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                NotificationPreferences.setOverdueIntervalHours(context, intervalHours)
-                OverdueNotificationWorker.schedule(context, intervalHours)
-                onDismiss()
-            }) { Text("Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Text(
+                if (intervalHours == 0)
+                    "Periodic notifications are disabled."
+                else
+                    "You'll be notified every $intervalHours hour${if (intervalHours > 1) "s" else ""} when you have pending tasks.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            HorizontalDivider()
+            Text(
+                "This setting only affects pending tasks and does not change custom reminder times on individual tasks.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-    )
+    }
 }
 
 @Composable
