@@ -3,6 +3,7 @@ package com.maxximum.kairos
 import android.Manifest
 import android.app.AlarmManager
 import android.app.DatePickerDialog
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -22,6 +23,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -29,7 +31,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -42,6 +46,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.consumePositionChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -161,7 +167,7 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
 
     HorizontalPager(
         state = pagerState,
-        userScrollEnabled = pagerState.currentPage != 2,
+        userScrollEnabled = true,
         beyondViewportPageCount = 1,
         modifier = Modifier.fillMaxSize()
     ) { page ->
@@ -372,6 +378,7 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
                     trailingIcon = { Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 )
             }
+
         }
     }
 }
@@ -409,6 +416,7 @@ fun QuickActionButton(label: String, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
     val todos by viewModel.allTodos.collectAsState(initial = emptyList())
     var selectedTodos by remember { mutableStateOf(setOf<Int>()) }
     var isSelectionMode by remember { mutableStateOf(false) }
@@ -542,7 +550,21 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
                             TodoItem(
                                 todo = todo,
                                 isSelected = todo.id in selectedTodos,
-                                onToggleComplete = { viewModel.update(todo.copy(isCompleted = !todo.isCompleted)) },
+                                onToggleComplete = {
+                                    val markCompleted = !todo.isCompleted
+                                    val updated = todo.applyCompletionChange(markCompleted)
+                                    viewModel.update(updated)
+                                    if (updated.reminderTime != null && !updated.isCompleted) {
+                                        AlarmScheduler.schedule(context, updated)
+                                    } else {
+                                        AlarmScheduler.cancel(context, updated)
+                                    }
+                                    val completedRecurring = markCompleted && todo.recurrenceType() != RecurrenceType.NONE
+                                    ToastUtils.show(
+                                        context,
+                                        if (completedRecurring) "Moved to next reminder" else if (markCompleted) "Task completed" else "Task marked pending"
+                                    )
+                                },
                                 onClick = {
                                     if (isSelectionMode) {
                                         selectedTodos = if (todo.id in selectedTodos) selectedTodos - todo.id else selectedTodos + todo.id
@@ -560,7 +582,21 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
                         TodoItem(
                             todo = todo,
                             isSelected = todo.id in selectedTodos,
-                            onToggleComplete = { viewModel.update(todo.copy(isCompleted = !todo.isCompleted)) },
+                            onToggleComplete = {
+                                val markCompleted = !todo.isCompleted
+                                val updated = todo.applyCompletionChange(markCompleted)
+                                viewModel.update(updated)
+                                if (updated.reminderTime != null && !updated.isCompleted) {
+                                    AlarmScheduler.schedule(context, updated)
+                                } else {
+                                    AlarmScheduler.cancel(context, updated)
+                                }
+                                val completedRecurring = markCompleted && todo.recurrenceType() != RecurrenceType.NONE
+                                ToastUtils.show(
+                                    context,
+                                    if (completedRecurring) "Moved to next reminder" else if (markCompleted) "Task completed" else "Task marked pending"
+                                )
+                            },
                             onClick = {
                                 if (isSelectionMode) {
                                     selectedTodos = if (todo.id in selectedTodos) selectedTodos - todo.id else selectedTodos + todo.id
@@ -620,6 +656,9 @@ fun TodoItem(todo: Todo, isSelected: Boolean, onToggleComplete: () -> Unit, onCl
                 if (todo.isHighPriority && !todo.isCompleted) {
                     Text("High Priority", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFF6D00))
                 }
+                if (todo.recurrenceType() != RecurrenceType.NONE) {
+                    Text("Repeats ${todo.recurrenceType().shortLabel().lowercase(Locale.getDefault())}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                }
                 if (todo.reminderTime != null) {
                     val date = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(todo.reminderTime))
                     Text(
@@ -645,8 +684,12 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
     val keyboardController = LocalSoftwareKeyboardController.current
     var showTimePickerDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDailyTimeDialog by remember { mutableStateOf(false) }
+    var showWeeklyDialog by remember { mutableStateOf(false) }
+    var selectedWeeklyDay by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.DAY_OF_WEEK)) }
     var titleDraft by remember { mutableStateOf("") }
     var descriptionDraft by remember { mutableStateOf("") }
+    var canUseFullScreenIntent by remember { mutableStateOf(canUseFullScreenIntentPermission(context)) }
 
     BackHandler(onBack = onBack)
     
@@ -664,6 +707,10 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
     LaunchedEffect(todo?.id) {
         titleDraft = todo?.title.orEmpty()
         descriptionDraft = todo?.description.orEmpty()
+        canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
+        selectedWeeklyDay = (todo?.reminderTime?.let {
+            Calendar.getInstance().apply { timeInMillis = it }.get(Calendar.DAY_OF_WEEK)
+        } ?: Calendar.getInstance().get(Calendar.DAY_OF_WEEK))
     }
 
     LaunchedEffect(titleDraft, todo?.id) {
@@ -714,6 +761,7 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                 modifier = Modifier
                     .padding(innerPadding)
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -725,30 +773,134 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = currentTodo.isCompleted, onCheckedChange = { 
-                        val updated = currentTodo.copy(isCompleted = it)
+                        val updated = currentTodo.applyCompletionChange(it)
                         viewModel.update(updated)
-                        ToastUtils.show(context, if (it) "Task completed" else "Task marked pending")
+                        if (updated.reminderTime != null && !updated.isCompleted) {
+                            AlarmScheduler.schedule(context, updated)
+                        } else {
+                            AlarmScheduler.cancel(context, updated)
+                        }
+                        val completedRecurring = it && currentTodo.recurrenceType() != RecurrenceType.NONE
+                        ToastUtils.show(
+                            context,
+                            if (completedRecurring) "Moved to next reminder" else if (it) "Task completed" else "Task marked pending"
+                        )
                     })
                     OutlinedTextField(
                         value = titleDraft,
                         onValueChange = { titleDraft = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .pointerInput(Unit) {
+                                detectHorizontalDragGestures { change, _ ->
+                                    change.consumePositionChange()
+                                }
+                            },
                         label = { Text("Title") },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = currentTodo.isHighPriority,
-                        onCheckedChange = {
-                            val updated = currentTodo.copy(isHighPriority = it)
+                Text("Repeat", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val recurrenceType = currentTodo.recurrenceType()
+                    FilterChip(
+                        selected = recurrenceType == RecurrenceType.NONE,
+                        onClick = {
+                            val updated = currentTodo.copy(recurrence = RecurrenceType.NONE.name)
                             viewModel.update(updated)
-                            ToastUtils.show(context, if (it) "High priority enabled" else "Low priority")
-                        }
+                        },
+                        label = { Text("Off") }
                     )
-                    Text("High Priority", style = MaterialTheme.typography.bodyMedium)
+                    FilterChip(
+                        selected = recurrenceType == RecurrenceType.DAILY,
+                        onClick = {
+                            showDailyTimeDialog = true
+                        },
+                        label = { Text("Daily") }
+                    )
+                    FilterChip(
+                        selected = recurrenceType == RecurrenceType.WEEKLY,
+                        onClick = {
+                            showWeeklyDialog = true
+                        },
+                        label = { Text("Weekly") }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Notification Options", style = MaterialTheme.typography.labelMedium)
+                
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Switch(
+                            checked = currentTodo.isHighPriority,
+                            onCheckedChange = {
+                                val updated = currentTodo.copy(isHighPriority = it)
+                                viewModel.update(updated)
+                                ToastUtils.show(context, if (it) "High priority enabled" else "Low priority")
+                            },
+                            enabled = !currentTodo.isFullScreenReminder
+                        )
+                        Text(
+                            "High Priority",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (currentTodo.isFullScreenReminder) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                        )
+                        if (currentTodo.isFullScreenReminder) {
+                            Text(
+                                "(auto on with full-screen)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Switch(
+                            checked = currentTodo.isFullScreenReminder,
+                            onCheckedChange = { enabled ->
+                                if (enabled && !canUseFullScreenIntentPermission(context)) {
+                                    openFullScreenIntentSettings(context)
+                                    canUseFullScreenIntent = false
+                                    ToastUtils.show(context, "Allow full-screen reminders in system settings")
+                                } else {
+                                    canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
+                                    val updated = currentTodo.copy(isFullScreenReminder = enabled)
+                                    viewModel.update(updated)
+                                    ToastUtils.show(context, if (enabled) "Full-screen reminder enabled" else "Full-screen reminder disabled")
+                                }
+                            }
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Full-screen reminder", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (canUseFullScreenIntent) "Shows over lock screen when reminder triggers."
+                                else "Permission needed on this Android version.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (!canUseFullScreenIntent) {
+                        TextButton(onClick = {
+                            openFullScreenIntentSettings(context)
+                            canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
+                        }) {
+                            Text("Open Full-Screen Permission")
+                        }
+                    }
                 }
 
                 OutlinedTextField(
@@ -834,38 +986,148 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
-                        showTimePickerDialog = true
-                    }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.Schedule, null); Spacer(Modifier.width(4.dp)); Text("Today")
-                    }
-                    
-                    Button(onClick = {
-                        showDarkDateTimePicker(context) {
-                            val updated = currentTodo.copy(reminderTime = it)
-                            viewModel.update(updated)
-                            AlarmScheduler.schedule(context, updated)
-                            ToastUtils.show(context, "Reminder set")
+
+                if (currentTodo.recurrenceType() == RecurrenceType.NONE) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            showTimePickerDialog = true
+                        }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.Schedule, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Today", maxLines = 1)
                         }
-                    }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.EditCalendar, null); Spacer(Modifier.width(4.dp)); Text("Custom")
+                        
+                        Button(onClick = {
+                            showDarkDateTimePicker(context) {
+                                val updated = currentTodo.copy(reminderTime = it)
+                                viewModel.update(updated)
+                                AlarmScheduler.schedule(context, updated)
+                                ToastUtils.show(context, "Reminder set")
+                            }
+                        }, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.EditCalendar, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Custom", maxLines = 1)
+                        }
                     }
 
-                    OutlinedButton(
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                if (currentTodo.reminderTime != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    FilledTonalButton(
                         onClick = {
                             AlarmScheduler.cancel(context, currentTodo)
                             viewModel.update(currentTodo.copy(reminderTime = null))
                             ToastUtils.show(context, "Reminder cleared")
                         },
-                        enabled = currentTodo.reminderTime != null,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Close, null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Clear")
+                        Spacer(Modifier.width(6.dp))
+                        Text("Clear Reminder", maxLines = 1)
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                if (showDailyTimeDialog) {
+                    val cal = Calendar.getInstance().apply {
+                        currentTodo.reminderTime?.let { timeInMillis = it }
+                    }
+                    val timePickerState = rememberTimePickerState(
+                        initialHour = cal.get(Calendar.HOUR_OF_DAY),
+                        initialMinute = cal.get(Calendar.MINUTE),
+                        is24Hour = true
+                    )
+
+                    AlertDialog(
+                        onDismissRequest = { showDailyTimeDialog = false },
+                        title = { Text("Daily reminder time") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Choose the time for this daily reminder.")
+                                TimePicker(state = timePickerState)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDailyTimeDialog = false }) {
+                                Text(stringResource(android.R.string.cancel))
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                val nextTime = nextDailyOccurrence(timePickerState.hour, timePickerState.minute)
+                                val updated = currentTodo.copy(
+                                    recurrence = RecurrenceType.DAILY.name,
+                                    reminderTime = nextTime,
+                                    isCompleted = false
+                                )
+                                viewModel.update(updated)
+                                AlarmScheduler.schedule(context, updated)
+                                ToastUtils.show(context, "Daily reminder set")
+                                showDailyTimeDialog = false
+                            }) {
+                                Text("Save")
+                            }
+                        }
+                    )
+                }
+
+                if (showWeeklyDialog) {
+                    val cal = Calendar.getInstance().apply {
+                        currentTodo.reminderTime?.let { timeInMillis = it }
+                    }
+                    val timePickerState = rememberTimePickerState(
+                        initialHour = cal.get(Calendar.HOUR_OF_DAY),
+                        initialMinute = cal.get(Calendar.MINUTE),
+                        is24Hour = true
+                    )
+
+                    AlertDialog(
+                        onDismissRequest = { showWeeklyDialog = false },
+                        title = { Text("Weekly reminder schedule") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("Pick day of week and time.")
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(weekDays()) { day ->
+                                        FilterChip(
+                                            selected = selectedWeeklyDay == day,
+                                            onClick = { selectedWeeklyDay = day },
+                                            label = { Text(shortWeekDayLabel(day)) }
+                                        )
+                                    }
+                                }
+                                TimePicker(state = timePickerState)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showWeeklyDialog = false }) {
+                                Text(stringResource(android.R.string.cancel))
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                val nextTime = nextWeeklyOccurrence(
+                                    dayOfWeek = selectedWeeklyDay,
+                                    hour = timePickerState.hour,
+                                    minute = timePickerState.minute
+                                )
+                                val updated = currentTodo.copy(
+                                    recurrence = RecurrenceType.WEEKLY.name,
+                                    reminderTime = nextTime,
+                                    isCompleted = false
+                                )
+                                viewModel.update(updated)
+                                AlarmScheduler.schedule(context, updated)
+                                ToastUtils.show(context, "Weekly reminder set")
+                                showWeeklyDialog = false
+                            }) {
+                                Text("Save")
+                            }
+                        }
+                    )
                 }
 
                 if (showTimePickerDialog) {
@@ -1021,6 +1283,80 @@ fun showDarkDateTimePicker(context: Context, onResult: (Long) -> Unit) {
     }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
 }
 
+fun nextDailyOccurrence(hour: Int, minute: Int, now: Long = System.currentTimeMillis()): Long {
+    val cal = Calendar.getInstance().apply {
+        timeInMillis = now
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    if (cal.timeInMillis <= now) {
+        cal.add(Calendar.DAY_OF_YEAR, 1)
+    }
+    return cal.timeInMillis
+}
+
+fun nextWeeklyOccurrence(dayOfWeek: Int, hour: Int, minute: Int, now: Long = System.currentTimeMillis()): Long {
+    val cal = Calendar.getInstance().apply {
+        timeInMillis = now
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+
+    val currentDay = cal.get(Calendar.DAY_OF_WEEK)
+    var dayDelta = dayOfWeek - currentDay
+    if (dayDelta < 0) dayDelta += 7
+    cal.add(Calendar.DAY_OF_YEAR, dayDelta)
+
+    if (cal.timeInMillis <= now) {
+        cal.add(Calendar.DAY_OF_YEAR, 7)
+    }
+    return cal.timeInMillis
+}
+
+fun weekDays(): List<Int> {
+    return listOf(
+        Calendar.MONDAY,
+        Calendar.TUESDAY,
+        Calendar.WEDNESDAY,
+        Calendar.THURSDAY,
+        Calendar.FRIDAY,
+        Calendar.SATURDAY,
+        Calendar.SUNDAY
+    )
+}
+
+fun shortWeekDayLabel(dayOfWeek: Int): String {
+    return when (dayOfWeek) {
+        Calendar.MONDAY -> "Mon"
+        Calendar.TUESDAY -> "Tue"
+        Calendar.WEDNESDAY -> "Wed"
+        Calendar.THURSDAY -> "Thu"
+        Calendar.FRIDAY -> "Fri"
+        Calendar.SATURDAY -> "Sat"
+        Calendar.SUNDAY -> "Sun"
+        else -> "?"
+    }
+}
+
+fun canUseFullScreenIntentPermission(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return true
+    val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    return manager.canUseFullScreenIntent()
+}
+
+fun openFullScreenIntentSettings(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+    val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+        data = Uri.parse("package:${context.packageName}")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
+}
+
 object ToastUtils {
     fun show(context: android.content.Context, message: String) {
         android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
@@ -1085,111 +1421,6 @@ fun TodoSectionHeader(label: String, count: Int, isOverdue: Boolean) {
             Badge(containerColor = accentColor) {
                 Text("$count", color = Color.White)
             }
-        }
-    }
-}
-
-// ── Settings screen ───────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
-    val isDebugBuild = remember(context) {
-        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-    }
-    var intervalHours by remember {
-        mutableIntStateOf(NotificationPreferences.getOverdueIntervalHours(context))
-    }
-    val options = listOf(0, 1, 2, 3, 4, 6, 8, 12, 24)
-    val optionRows = options.chunked(3)
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("Notification Settings")
-                        if (isDebugBuild) {
-                            DebugBuildBadge()
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        },
-        bottomBar = {
-            Surface(tonalElevation = 4.dp) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    Button(onClick = {
-                        NotificationPreferences.setOverdueIntervalHours(context, intervalHours)
-                        OverdueNotificationWorker.schedule(context, intervalHours)
-                        onBack()
-                    }) {
-                        Text("Save")
-                    }
-                }
-            }
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                "Remind me of pending tasks every:",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                optionRows.forEach { rowItems ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        rowItems.forEach { h ->
-                            FilterChip(
-                                selected = intervalHours == h,
-                                onClick = { intervalHours = h },
-                                label = {
-                                    Text(
-                                        when (h) {
-                                            0 -> "Off"
-                                            1 -> "1 hr"
-                                            else -> "$h hrs"
-                                        }
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-            Text(
-                if (intervalHours == 0)
-                    "Periodic notifications are disabled."
-                else
-                    "You'll be notified every $intervalHours hour${if (intervalHours > 1) "s" else ""} when you have pending tasks.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            HorizontalDivider()
-            Text(
-                "This setting only affects pending tasks and does not change custom reminder times on individual tasks.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

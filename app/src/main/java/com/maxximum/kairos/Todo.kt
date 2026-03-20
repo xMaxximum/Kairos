@@ -12,6 +12,7 @@ data class Todo(
     val description: String = "",
     val timestamp: Long = System.currentTimeMillis(),
     val reminderTime: Long? = null,
+    val recurrence: String = RecurrenceType.NONE.name,
     val isHighPriority: Boolean = false,
     val isFullScreenReminder: Boolean = false,
     val attachments: List<String> = emptyList(),

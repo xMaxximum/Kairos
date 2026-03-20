@@ -52,7 +52,13 @@ class ReminderReceiver : BroadcastReceiver() {
         val dao = AppDatabase.getDatabase(context).todoDao()
         CoroutineScope(Dispatchers.IO).launch {
             dao.getTodoById(todoId)?.let {
-                dao.updateTodo(it.copy(isCompleted = true))
+                val updated = it.applyCompletionChange(markCompleted = true)
+                dao.updateTodo(updated)
+                if (updated.reminderTime != null && !updated.isCompleted) {
+                    AlarmScheduler.schedule(context, updated)
+                } else {
+                    AlarmScheduler.cancel(context, updated)
+                }
             }
         }
     }
@@ -65,13 +71,14 @@ class ReminderReceiver : BroadcastReceiver() {
         isFullScreen: Boolean
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = if (isHighPriority) "todo_reminders_high" else "todo_reminders_low"
+        val effectiveHighPriority = isHighPriority || isFullScreen
+        val channelId = if (effectiveHighPriority) "todo_reminders_high" else "todo_reminders_low"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val importance = if (isHighPriority) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
+            val importance = if (effectiveHighPriority) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
             val channel = NotificationChannel(channelId, "Todo Reminders", importance).apply {
                 description = "Notifications for todo tasks"
-                enableVibration(isHighPriority)
+                enableVibration(effectiveHighPriority)
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -106,17 +113,17 @@ class ReminderReceiver : BroadcastReceiver() {
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle(if (isHighPriority) "High Priority Task" else "Task Reminder")
+            .setContentTitle(if (effectiveHighPriority) "High Priority Task" else "Task Reminder")
             .setContentText(title)
-            .setPriority(if (isHighPriority) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(if (effectiveHighPriority) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setVibrate(if (isHighPriority) longArrayOf(0, 300, 250, 300) else longArrayOf(0L))
+            .setVibrate(if (effectiveHighPriority) longArrayOf(0, 300, 250, 300) else longArrayOf(0L))
             .addAction(android.R.drawable.ic_menu_edit, "Postpone", postponePendingIntent)
             .addAction(android.R.drawable.ic_menu_view, "Done", donePendingIntent)
 
-        if (isFullScreen) {
+        if (isFullScreen && canUseFullScreenIntentPermission(context)) {
             val fullScreenIntent = Intent(context, FullScreenReminderActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION
                 putExtra("todo_title", title)
