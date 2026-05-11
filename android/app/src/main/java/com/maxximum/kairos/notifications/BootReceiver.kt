@@ -1,10 +1,11 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.notifications
 
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.maxximum.kairos.data.local.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -52,3 +53,4 @@ class BootReceiver : BroadcastReceiver() {
         }
     }
 }
+

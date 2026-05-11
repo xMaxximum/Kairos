@@ -1,4 +1,4 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.app
 
 import android.app.NotificationManager
 import android.os.Build
@@ -42,6 +42,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
+import com.maxximum.kairos.data.local.AppDatabase
+import com.maxximum.kairos.domain.logic.applyTodoCompletion
+import com.maxximum.kairos.notifications.AlarmScheduler
+import com.maxximum.kairos.platform.ToastUtils
+import com.maxximum.kairos.platform.showDarkDateTimePicker
 import com.maxximum.kairos.ui.theme.KairosTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -102,32 +107,18 @@ class FullScreenReminderActivity : ComponentActivity() {
             val dao = AppDatabase.getDatabase(this@FullScreenReminderActivity).todoDao()
             val todo = dao.getTodoById(todoId)
             if (todo != null) {
-                val updated = todo.applyCompletionChange(markCompleted = true)
-                // Auto-delete one-off tasks when completed
-                if (todo.isOneOffTask && todo.recurrenceType() == RecurrenceType.NONE) {
-                    if (updated.reminderTime != null) {
-                        AlarmScheduler.cancel(this@FullScreenReminderActivity, updated)
-                    }
-                    dao.deleteTodo(updated)
-                    val manager = getSystemService(NotificationManager::class.java)
-                    manager.cancel(todoId)
-                    withContext(Dispatchers.Main) {
-                        ToastUtils.show(this@FullScreenReminderActivity, "Task auto-deleted")
-                        finish()
-                    }
-                } else {
-                    dao.updateTodo(updated)
-                    if (updated.reminderTime != null && !updated.isCompleted) {
-                        AlarmScheduler.schedule(this@FullScreenReminderActivity, updated)
-                    } else {
-                        AlarmScheduler.cancel(this@FullScreenReminderActivity, updated)
-                    }
-                    val manager = getSystemService(NotificationManager::class.java)
-                    manager.cancel(todoId)
-                    withContext(Dispatchers.Main) {
-                        ToastUtils.show(this@FullScreenReminderActivity, "Task completed")
-                        finish()
-                    }
+                val result = applyTodoCompletion(
+                    context = this@FullScreenReminderActivity,
+                    todo = todo,
+                    markCompleted = true,
+                    updateTodo = { dao.updateTodo(it) },
+                    deleteTodo = { dao.deleteTodo(it) }
+                )
+                val manager = getSystemService(NotificationManager::class.java)
+                manager.cancel(todoId)
+                withContext(Dispatchers.Main) {
+                    ToastUtils.show(this@FullScreenReminderActivity, result.message)
+                    finish()
                 }
             } else {
                 withContext(Dispatchers.Main) {
@@ -331,3 +322,4 @@ private fun FullScreenReminderContent(
         )
     }
 }
+

@@ -1,4 +1,4 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.notifications
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import com.maxximum.kairos.domain.model.Todo
 
 object AlarmScheduler {
     fun schedule(context: Context, todo: Todo) {
@@ -55,3 +56,4 @@ object AlarmScheduler {
         alarmManager.cancel(pendingIntent)
     }
 }
+

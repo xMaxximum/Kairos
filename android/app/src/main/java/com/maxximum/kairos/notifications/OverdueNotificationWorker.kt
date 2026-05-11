@@ -1,4 +1,4 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.notifications
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +8,8 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.*
+import com.maxximum.kairos.app.MainActivity
+import com.maxximum.kairos.data.local.AppDatabase
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 
@@ -106,3 +108,4 @@ class OverdueNotificationWorker(
         }
     }
 }
+

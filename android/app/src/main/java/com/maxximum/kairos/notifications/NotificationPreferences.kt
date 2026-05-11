@@ -1,4 +1,4 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.notifications
 
 import android.content.Context
 
@@ -19,3 +19,4 @@ object NotificationPreferences {
             .apply()
     }
 }
+

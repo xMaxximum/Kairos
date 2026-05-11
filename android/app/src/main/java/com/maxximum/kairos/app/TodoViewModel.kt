@@ -1,8 +1,15 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.app
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.maxximum.kairos.data.local.AppDatabase
+import com.maxximum.kairos.data.local.LocalTodoRepository
+import com.maxximum.kairos.data.local.TodoRepository
+import com.maxximum.kairos.domain.logic.TodoCompletionResult
+import com.maxximum.kairos.domain.logic.applyTodoCompletion
+import com.maxximum.kairos.domain.model.Todo
+import com.maxximum.kairos.notifications.AlarmScheduler
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.Flow
@@ -25,7 +32,7 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val todoDao = AppDatabase.getDatabase(application).todoDao()
-        repository = TodoRepository(todoDao)
+        repository = LocalTodoRepository(todoDao)
         allTodos = repository.allTodos
     }
 
@@ -36,6 +43,27 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun update(todo: Todo) = viewModelScope.launch {
         repository.updateTodo(todo)
+    }
+
+    fun toggleComplete(
+        todo: Todo,
+        markCompleted: Boolean,
+        onResult: (TodoCompletionResult) -> Unit = {}
+    ) = viewModelScope.launch {
+        val result = applyTodoCompletion(
+            context = getApplication(),
+            todo = todo,
+            markCompleted = markCompleted,
+            updateTodo = { repository.updateTodo(it) },
+            deleteTodo = {
+                recentlyDeletedTodos = listOf(todo)
+                repository.deleteTodo(it)
+            }
+        )
+        if (result.deleted) {
+            _undoEvents.emit(UndoEvent.Delete("Deleted ${todo.title}"))
+        }
+        onResult(result)
     }
 
     fun delete(todo: Todo, restoreTodo: Todo = todo) = viewModelScope.launch {

@@ -1,6 +1,7 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.data.local
 
 import androidx.room.*
+import com.maxximum.kairos.domain.model.Todo
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -23,3 +24,4 @@ interface TodoDao {
     @Delete
     suspend fun deleteTodo(todo: Todo)
 }
+

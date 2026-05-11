@@ -1,4 +1,4 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.notifications
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +8,13 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import com.maxximum.kairos.app.FullScreenReminderActivity
+import com.maxximum.kairos.app.MainActivity
+import com.maxximum.kairos.app.PostponeActivity
+import com.maxximum.kairos.data.local.AppDatabase
+import com.maxximum.kairos.domain.logic.applyTodoCompletion
+import com.maxximum.kairos.platform.ToastUtils
+import com.maxximum.kairos.platform.canUseFullScreenIntentPermission
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -52,20 +59,13 @@ class ReminderReceiver : BroadcastReceiver() {
         val dao = AppDatabase.getDatabase(context).todoDao()
         CoroutineScope(Dispatchers.IO).launch {
             dao.getTodoById(todoId)?.let {
-                val updated = it.applyCompletionChange(markCompleted = true)
-                if (it.isOneOffTask && it.recurrenceType() == RecurrenceType.NONE) {
-                    dao.deleteTodo(updated)
-                    if (updated.reminderTime != null) {
-                        AlarmScheduler.cancel(context, updated)
-                    }
-                } else {
-                    dao.updateTodo(updated)
-                    if (updated.reminderTime != null && !updated.isCompleted) {
-                        AlarmScheduler.schedule(context, updated)
-                    } else {
-                        AlarmScheduler.cancel(context, updated)
-                    }
-                }
+                applyTodoCompletion(
+                    context = context,
+                    todo = it,
+                    markCompleted = true,
+                    updateTodo = { updated -> dao.updateTodo(updated) },
+                    deleteTodo = { updated -> dao.deleteTodo(updated) }
+                )
             }
         }
     }
@@ -146,3 +146,4 @@ class ReminderReceiver : BroadcastReceiver() {
         notificationManager.notify(todoId, builder.build())
     }
 }
+

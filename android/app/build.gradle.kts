@@ -15,6 +15,10 @@ if (versionPropsFile.exists()) {
 }
 val currentVersionCode = (versionProperties["versionCode"] as String).toInt()
 val currentVersionName = versionProperties["versionName"] as String? ?: "0.1.0"
+val releaseKeystoreFile = file("../maxximum.keystore")
+val releaseStorePassword = System.getenv("KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: "maxximum_key"
+val hasReleaseSigning = releaseKeystoreFile.exists() && !releaseStorePassword.isNullOrBlank()
 
 android {
     namespace = "com.maxximum.kairos"
@@ -31,11 +35,13 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("../maxximum.keystore")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: "maxximum_key"
-            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseStorePassword
+            }
         }
     }
 
@@ -47,7 +53,9 @@ android {
         }
         release {
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

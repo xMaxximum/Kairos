@@ -1,4 +1,4 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.data.local
 
 import android.content.Context
 import androidx.room.Database
@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.maxximum.kairos.domain.model.Todo
 
 @Database(entities = [Todo::class], version = 4, exportSchema = false)
 @TypeConverters(Converters::class)
@@ -39,3 +40,4 @@ abstract class AppDatabase : RoomDatabase() {
         }
     }
 }
+

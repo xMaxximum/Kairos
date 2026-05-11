@@ -23,7 +23,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Kairos">
         <activity
-            android:name=".MainActivity"
+            android:name=".app.MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:windowSoftInputMode="adjustResize"
@@ -35,21 +35,21 @@
         </activity>
 
         <activity
-            android:name=".FullScreenReminderActivity"
+            android:name=".app.FullScreenReminderActivity"
             android:showOnLockScreen="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:theme="@style/Theme.Kairos" />
 
         <activity
-            android:name=".PostponeActivity"
+            android:name=".app.PostponeActivity"
             android:theme="@style/Theme.Kairos.TransparentOverlay"
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:exported="false" />
 
-        <receiver android:name=".ReminderReceiver" android:exported="false" />
-        <receiver android:name=".BootReceiver" android:exported="true">
+        <receiver android:name=".notifications.ReminderReceiver" android:exported="false" />
+        <receiver android:name=".notifications.BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

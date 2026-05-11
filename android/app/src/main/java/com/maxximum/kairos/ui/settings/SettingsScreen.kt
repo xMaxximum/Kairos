@@ -1,4 +1,4 @@
-package com.maxximum.kairos
+package com.maxximum.kairos.ui.settings
 
 import android.content.pm.ApplicationInfo
 import androidx.activity.compose.BackHandler
@@ -30,6 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.maxximum.kairos.notifications.NotificationPreferences
+import com.maxximum.kairos.notifications.OverdueNotificationWorker
+import com.maxximum.kairos.ui.components.DebugBuildBadge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -134,3 +137,4 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
     }
 }
+
