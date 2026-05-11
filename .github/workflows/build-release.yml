@@ -33,13 +33,13 @@ jobs:
 
       - name: Decode keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > maxximum.keystore
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/maxximum.keystore
 
       - name: Make gradlew executable
-        run: chmod +x gradlew
+        run: chmod +x android/gradlew
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease
+        run: cd android && ./gradlew assembleRelease
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEYSTORE_KEY_ALIAS: ${{ secrets.KEYSTORE_KEY_ALIAS }}
@@ -54,13 +54,13 @@ jobs:
 
       - name: Rename APK
         run: |
-          mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Kairos.apk
+          mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/Kairos.apk
 
       - name: Upload APK to artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: app/build/outputs/apk/release/Kairos.apk
+          path: android/app/build/outputs/apk/release/Kairos.apk
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -75,6 +75,6 @@ jobs:
             Built from commit: ${{ github.sha }}
             
             Download the APK below to install directly on your device.
-          files: app/build/outputs/apk/release/Kairos.apk
+          files: android/app/build/outputs/apk/release/Kairos.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

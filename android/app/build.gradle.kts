@@ -8,7 +8,7 @@ plugins {
 }
 
 // Load version from properties file
-val versionPropsFile = file("../version.properties")
+val versionPropsFile = file("../../version.properties")
 val versionProperties = Properties()
 if (versionPropsFile.exists()) {
     versionProperties.load(FileInputStream(versionPropsFile))
@@ -103,23 +103,25 @@ dependencies {
 // Task to auto-increment version code and patch version
 tasks.register("incrementVersionCode") {
     doLast {
-        val versionPropsFile = file("../version.properties")
+        // version.properties is kept at the repository root so other platforms can read it
+        val versionPropsFile = file("../../version.properties")
         val versionProperties = Properties()
         if (versionPropsFile.exists()) {
             versionProperties.load(FileInputStream(versionPropsFile))
         }
-        
+
         // Increment patch version (last number in semantic versioning)
         val currentVersionName = versionProperties["versionName"] as String? ?: "0.1.0"
         val versionParts = currentVersionName.split(".").toMutableList()
         val patch = versionParts.last().toInt()
         versionParts[versionParts.size - 1] = (patch + 1).toString()
         val newVersionName = versionParts.joinToString(".")
-        
-        // Increment versionCode
-        val currentCode = (versionProperties["versionCode"] as String).toInt()
+
+        // Increment versionCode (guarding against nulls)
+        val currentCodeStr = versionProperties["versionCode"] as String?
+        val currentCode = currentCodeStr?.toIntOrNull() ?: 0
         val newCode = currentCode + 1
-        
+
         versionProperties["versionName"] = newVersionName
         versionProperties["versionCode"] = newCode.toString()
         versionProperties.store(versionPropsFile.outputStream(), "Auto-incremented version")
