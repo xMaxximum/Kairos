@@ -20,3 +20,4 @@ local.properties
 *.pem
 *.key
 BUILD_LOCAL.txt
+/.vscode
