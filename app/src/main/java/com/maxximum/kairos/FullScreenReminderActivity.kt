@@ -103,17 +103,31 @@ class FullScreenReminderActivity : ComponentActivity() {
             val todo = dao.getTodoById(todoId)
             if (todo != null) {
                 val updated = todo.applyCompletionChange(markCompleted = true)
-                dao.updateTodo(updated)
-                if (updated.reminderTime != null && !updated.isCompleted) {
-                    AlarmScheduler.schedule(this@FullScreenReminderActivity, updated)
+                // Auto-delete one-off tasks when completed
+                if (todo.isOneOffTask && todo.recurrenceType() == RecurrenceType.NONE) {
+                    if (updated.reminderTime != null) {
+                        AlarmScheduler.cancel(this@FullScreenReminderActivity, updated)
+                    }
+                    dao.deleteTodo(updated)
+                    val manager = getSystemService(NotificationManager::class.java)
+                    manager.cancel(todoId)
+                    withContext(Dispatchers.Main) {
+                        ToastUtils.show(this@FullScreenReminderActivity, "Task auto-deleted")
+                        finish()
+                    }
                 } else {
-                    AlarmScheduler.cancel(this@FullScreenReminderActivity, updated)
-                }
-                val manager = getSystemService(NotificationManager::class.java)
-                manager.cancel(todoId)
-                withContext(Dispatchers.Main) {
-                    ToastUtils.show(this@FullScreenReminderActivity, "Task completed")
-                    finish()
+                    dao.updateTodo(updated)
+                    if (updated.reminderTime != null && !updated.isCompleted) {
+                        AlarmScheduler.schedule(this@FullScreenReminderActivity, updated)
+                    } else {
+                        AlarmScheduler.cancel(this@FullScreenReminderActivity, updated)
+                    }
+                    val manager = getSystemService(NotificationManager::class.java)
+                    manager.cancel(todoId)
+                    withContext(Dispatchers.Main) {
+                        ToastUtils.show(this@FullScreenReminderActivity, "Task completed")
+                        finish()
+                    }
                 }
             } else {
                 withContext(Dispatchers.Main) {

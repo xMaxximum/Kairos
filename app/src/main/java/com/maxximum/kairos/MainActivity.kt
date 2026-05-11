@@ -58,6 +58,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.maxximum.kairos.ui.theme.KairosTheme
 import kotlinx.coroutines.delay
@@ -125,6 +128,7 @@ enum class TodoFilter(val label: String) {
 fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var selectedTodoId by remember { mutableStateOf(if (initialTodoId > 0) initialTodoId else -1) }
     var allowDetailFromClick by remember { mutableStateOf(initialTodoId > 0) }
@@ -145,7 +149,10 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
     }
 
     LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage != 0) keyboardController?.hide()
+        if (pagerState.currentPage != 0) {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+        }
     }
 
     BackHandler(enabled = pagerState.currentPage == 2) {
@@ -173,6 +180,7 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
     ) { page ->
         when (page) {
             0 -> AddTodoScreen(
+                isActive = pagerState.currentPage == 0,
                 onSave = { todo ->
                     viewModel.insert(todo) { id ->
                         val savedTodo = todo.copy(id = id.toInt())
@@ -214,12 +222,13 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
+fun AddTodoScreen(isActive: Boolean, onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var reminderTime by remember { mutableStateOf<Long?>(null) }
     var isHighPriority by remember { mutableStateOf(false) }
     var isFullScreen by remember { mutableStateOf(false) }
+    var isOneOffTask by remember { mutableStateOf(false) }
     var showReminderPopup by remember { mutableStateOf(false) }
     
     val focusRequester = remember { FocusRequester() }
@@ -228,8 +237,10 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+    LaunchedEffect(isActive) {
+        if (isActive) {
+            focusRequester.requestFocus()
+        }
     }
 
     Scaffold(
@@ -294,6 +305,11 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
                                 Text("High Priority", style = MaterialTheme.typography.bodySmall)
                             }
 
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = isOneOffTask, onCheckedChange = { isOneOffTask = it })
+                                Text("Auto-delete when done", style = MaterialTheme.typography.bodySmall)
+                            }
+
                             if (reminderTime != null) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Checkbox(checked = isFullScreen, onCheckedChange = { isFullScreen = it })
@@ -313,7 +329,8 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
                                             description = description,
                                             reminderTime = reminderTime,
                                             isHighPriority = isHighPriority,
-                                            isFullScreenReminder = isFullScreen
+                                            isFullScreenReminder = isFullScreen,
+                                            isOneOffTask = isOneOffTask
                                         )
                                     )
                                     title = ""
@@ -321,6 +338,7 @@ fun AddTodoScreen(onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
                                     reminderTime = null
                                     isHighPriority = false
                                     isFullScreen = false
+                                    isOneOffTask = false
                                     ToastUtils.show(context, "Task Saved!")
                                 }
                             },
@@ -553,17 +571,25 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
                                 onToggleComplete = {
                                     val markCompleted = !todo.isCompleted
                                     val updated = todo.applyCompletionChange(markCompleted)
-                                    viewModel.update(updated)
-                                    if (updated.reminderTime != null && !updated.isCompleted) {
-                                        AlarmScheduler.schedule(context, updated)
+                                    if (markCompleted && todo.isOneOffTask && todo.recurrenceType() == RecurrenceType.NONE) {
+                                        if (updated.reminderTime != null) {
+                                            AlarmScheduler.cancel(context, updated)
+                                        }
+                                        viewModel.delete(updated, restoreTodo = todo)
+                                        ToastUtils.show(context, "Task auto-deleted")
                                     } else {
-                                        AlarmScheduler.cancel(context, updated)
+                                        viewModel.update(updated)
+                                        if (updated.reminderTime != null && !updated.isCompleted) {
+                                            AlarmScheduler.schedule(context, updated)
+                                        } else {
+                                            AlarmScheduler.cancel(context, updated)
+                                        }
+                                        val completedRecurring = markCompleted && todo.recurrenceType() != RecurrenceType.NONE
+                                        ToastUtils.show(
+                                            context,
+                                            if (completedRecurring) "Moved to next reminder" else if (markCompleted) "Task completed" else "Task marked pending"
+                                        )
                                     }
-                                    val completedRecurring = markCompleted && todo.recurrenceType() != RecurrenceType.NONE
-                                    ToastUtils.show(
-                                        context,
-                                        if (completedRecurring) "Moved to next reminder" else if (markCompleted) "Task completed" else "Task marked pending"
-                                    )
                                 },
                                 onClick = {
                                     if (isSelectionMode) {
@@ -585,17 +611,23 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
                             onToggleComplete = {
                                 val markCompleted = !todo.isCompleted
                                 val updated = todo.applyCompletionChange(markCompleted)
-                                viewModel.update(updated)
-                                if (updated.reminderTime != null && !updated.isCompleted) {
-                                    AlarmScheduler.schedule(context, updated)
+                                // Auto-delete one-off tasks when completed
+                                if (markCompleted && todo.isOneOffTask && todo.recurrenceType() == RecurrenceType.NONE) {
+                                    viewModel.delete(updated)
+                                    ToastUtils.show(context, "Task auto-deleted")
                                 } else {
-                                    AlarmScheduler.cancel(context, updated)
+                                    viewModel.update(updated)
+                                    if (updated.reminderTime != null && !updated.isCompleted) {
+                                        AlarmScheduler.schedule(context, updated)
+                                    } else {
+                                        AlarmScheduler.cancel(context, updated)
+                                    }
+                                    val completedRecurring = markCompleted && todo.recurrenceType() != RecurrenceType.NONE
+                                    ToastUtils.show(
+                                        context,
+                                        if (completedRecurring) "Moved to next reminder" else if (markCompleted) "Task completed" else "Task marked pending"
+                                    )
                                 }
-                                val completedRecurring = markCompleted && todo.recurrenceType() != RecurrenceType.NONE
-                                ToastUtils.show(
-                                    context,
-                                    if (completedRecurring) "Moved to next reminder" else if (markCompleted) "Task completed" else "Task marked pending"
-                                )
                             },
                             onClick = {
                                 if (isSelectionMode) {
@@ -682,6 +714,7 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var showTimePickerDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDailyTimeDialog by remember { mutableStateOf(false) }
@@ -692,6 +725,19 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
     var canUseFullScreenIntent by remember { mutableStateOf(canUseFullScreenIntentPermission(context)) }
 
     BackHandler(onBack = onBack)
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
         todo?.let { currentTodo ->
@@ -774,17 +820,27 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = currentTodo.isCompleted, onCheckedChange = { 
                         val updated = currentTodo.applyCompletionChange(it)
-                        viewModel.update(updated)
-                        if (updated.reminderTime != null && !updated.isCompleted) {
-                            AlarmScheduler.schedule(context, updated)
+                        // Auto-delete one-off tasks when completed
+                        if (it && currentTodo.isOneOffTask && currentTodo.recurrenceType() == RecurrenceType.NONE) {
+                            if (updated.reminderTime != null) {
+                                AlarmScheduler.cancel(context, updated)
+                            }
+                            viewModel.delete(updated, restoreTodo = currentTodo)
+                            ToastUtils.show(context, "Task auto-deleted")
+                            onBack()
                         } else {
-                            AlarmScheduler.cancel(context, updated)
+                            viewModel.update(updated)
+                            if (updated.reminderTime != null && !updated.isCompleted) {
+                                AlarmScheduler.schedule(context, updated)
+                            } else {
+                                AlarmScheduler.cancel(context, updated)
+                            }
+                            val completedRecurring = it && currentTodo.recurrenceType() != RecurrenceType.NONE
+                            ToastUtils.show(
+                                context,
+                                if (completedRecurring) "Moved to next reminder" else if (it) "Task completed" else "Task marked pending"
+                            )
                         }
-                        val completedRecurring = it && currentTodo.recurrenceType() != RecurrenceType.NONE
-                        ToastUtils.show(
-                            context,
-                            if (completedRecurring) "Moved to next reminder" else if (it) "Task completed" else "Task marked pending"
-                        )
                     })
                     OutlinedTextField(
                         value = titleDraft,
@@ -899,6 +955,29 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                             canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
                         }) {
                             Text("Open Full-Screen Permission")
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Switch(
+                            checked = currentTodo.isOneOffTask,
+                            onCheckedChange = {
+                                val updated = currentTodo.copy(isOneOffTask = it)
+                                viewModel.update(updated)
+                                ToastUtils.show(context, if (it) "Auto-delete enabled" else "Auto-delete disabled")
+                            }
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-delete when done", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Automatically delete this task when marked as completed (non-recurring tasks only).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }

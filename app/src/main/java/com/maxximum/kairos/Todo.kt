@@ -17,7 +17,8 @@ data class Todo(
     val isFullScreenReminder: Boolean = false,
     val attachments: List<String> = emptyList(),
     val isCompleted: Boolean = false,
-    val isArchived: Boolean = false
+    val isArchived: Boolean = false,
+    val isOneOffTask: Boolean = false
 )
 
 class Converters {

@@ -53,11 +53,18 @@ class ReminderReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             dao.getTodoById(todoId)?.let {
                 val updated = it.applyCompletionChange(markCompleted = true)
-                dao.updateTodo(updated)
-                if (updated.reminderTime != null && !updated.isCompleted) {
-                    AlarmScheduler.schedule(context, updated)
+                if (it.isOneOffTask && it.recurrenceType() == RecurrenceType.NONE) {
+                    dao.deleteTodo(updated)
+                    if (updated.reminderTime != null) {
+                        AlarmScheduler.cancel(context, updated)
+                    }
                 } else {
-                    AlarmScheduler.cancel(context, updated)
+                    dao.updateTodo(updated)
+                    if (updated.reminderTime != null && !updated.isCompleted) {
+                        AlarmScheduler.schedule(context, updated)
+                    } else {
+                        AlarmScheduler.cancel(context, updated)
+                    }
                 }
             }
         }

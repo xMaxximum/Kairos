@@ -38,14 +38,16 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
         repository.updateTodo(todo)
     }
 
-    fun delete(todo: Todo) = viewModelScope.launch {
-        recentlyDeletedTodos = listOf(todo)
+    fun delete(todo: Todo, restoreTodo: Todo = todo) = viewModelScope.launch {
+        recentlyDeletedTodos = listOf(restoreTodo)
+        AlarmScheduler.cancel(getApplication(), todo)
         repository.deleteTodo(todo)
         _undoEvents.emit(UndoEvent.Delete("Deleted ${todo.title}"))
     }
     
     fun deleteMultiple(todos: List<Todo>) = viewModelScope.launch {
         recentlyDeletedTodos = todos
+        todos.forEach { AlarmScheduler.cancel(getApplication(), it) }
         todos.forEach { repository.deleteTodo(it) }
         _undoEvents.emit(UndoEvent.Delete("Deleted ${todos.size} tasks"))
     }
@@ -57,7 +59,12 @@ class TodoViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun undoDelete() = viewModelScope.launch {
-        recentlyDeletedTodos.forEach { repository.insertTodo(it) }
+        recentlyDeletedTodos.forEach { todo ->
+            repository.insertTodo(todo)
+            if (todo.reminderTime != null && !todo.isCompleted && !todo.isArchived) {
+                AlarmScheduler.schedule(getApplication(), todo)
+            }
+        }
         recentlyDeletedTodos = emptyList()
     }
 

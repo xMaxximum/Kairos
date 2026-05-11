@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Todo::class], version = 3, exportSchema = false)
+@Database(entities = [Todo::class], version = 4, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun todoDao(): TodoDao
@@ -19,6 +19,12 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE todos ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'NONE'")
             }
         }
+        
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE todos ADD COLUMN isOneOffTask INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         @Volatile
         private var Instance: AppDatabase? = null
@@ -26,7 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun getDatabase(context: Context): AppDatabase {
             return Instance ?: synchronized(this) {
                 Room.databaseBuilder(context, AppDatabase::class.java, "todo_database")
-                    .addMigrations(MIGRATION_2_3)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { Instance = it }
             }

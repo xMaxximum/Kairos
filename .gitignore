@@ -19,3 +19,4 @@ local.properties
 *.jks
 *.pem
 *.key
+BUILD_LOCAL.txt
