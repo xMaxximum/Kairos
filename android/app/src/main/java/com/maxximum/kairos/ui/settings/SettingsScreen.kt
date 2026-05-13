@@ -20,23 +20,34 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.maxximum.kairos.app.AuthUiState
 import com.maxximum.kairos.notifications.NotificationPreferences
 import com.maxximum.kairos.notifications.OverdueNotificationWorker
+import com.maxximum.kairos.ui.auth.AccountSettingsSection
 import com.maxximum.kairos.ui.components.DebugBuildBadge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    authState: AuthUiState,
+    onLogin: (String, String) -> Unit = { _, _ -> },
+    onRegister: (String, String) -> Unit = { _, _ -> },
+    onLogout: () -> Unit = {},
+    onServerChanged: (String) -> Unit = {}
+) {
     BackHandler { onBack() }
     val context = LocalContext.current
     val isDebugBuild = remember(context) {
@@ -56,7 +67,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Notification Settings")
+                        Text("Settings")
                         if (isDebugBuild) {
                             DebugBuildBadge()
                         }
@@ -95,6 +106,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            AccountSettingsSection(
+                state = authState,
+                onLogin = onLogin,
+                onRegister = onRegister,
+                onLogout = onLogout,
+                onServerChanged = onServerChanged
+            )
+            HorizontalDivider()
             Text(
                 "Remind me of pending tasks every:",
                 style = MaterialTheme.typography.bodyLarge

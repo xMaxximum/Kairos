@@ -13,6 +13,14 @@
 .externalNativeBuild
 .cxx
 local.properties
+bin/
+obj/
+artifacts/
+backend/.env
+backend/.env.*
+!backend/.env.example
+backend/src/Kairos.Api/appsettings.Local.json
+backend/src/Kairos.Api/appsettings.*.Local.json
 
 # Signing keys (DO NOT COMMIT)
 *.keystore

@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kairos}
+      POSTGRES_USER: ${POSTGRES_USER:-kairos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - kairos-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kairos -d kairos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./src/Kairos.Api
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-kairos};Username=${POSTGRES_USER:-kairos};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}
+      Jwt__Issuer: ${JWT_ISSUER:-Kairos}
+      Jwt__Audience: ${JWT_AUDIENCE:-KairosClients}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in backend/.env}
+      Jwt__AccessTokenMinutes: 15
+      Jwt__RefreshTokenDays: 60
+      Database__ApplyMigrationsOnStartup: true
+      Cors__AllowedOrigins__0: ${CORS_ORIGIN_0:-http://localhost:3000}
+      Cors__AllowedOrigins__1: ${CORS_ORIGIN_1:-http://localhost:5173}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  kairos-postgres:

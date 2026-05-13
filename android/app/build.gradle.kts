@@ -19,6 +19,9 @@ val releaseKeystoreFile = file("../maxximum.keystore")
 val releaseStorePassword = System.getenv("KEYSTORE_PASSWORD")
 val releaseKeyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: "maxximum_key"
 val hasReleaseSigning = releaseKeystoreFile.exists() && !releaseStorePassword.isNullOrBlank()
+val apiBaseUrl = providers.gradleProperty("kairosApiBaseUrl")
+    .orElse(providers.environmentVariable("KAIROS_API_BASE_URL"))
+    .orElse("http://10.10.1.58:8080/")
 
 android {
     namespace = "com.maxximum.kairos"
@@ -50,9 +53,11 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             isMinifyEnabled = false
+            buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrl.get()}\"")
         }
         release {
             isMinifyEnabled = true
+            buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrl.get()}\"")
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -68,6 +73,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

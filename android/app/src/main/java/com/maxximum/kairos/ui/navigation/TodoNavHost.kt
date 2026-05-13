@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.maxximum.kairos.app.AuthUiState
 import com.maxximum.kairos.app.TodoViewModel
 import com.maxximum.kairos.app.UndoEvent
 import com.maxximum.kairos.domain.model.*
@@ -62,20 +63,44 @@ import java.util.*
 import com.maxximum.kairos.ui.add.AddTodoScreen
 import com.maxximum.kairos.ui.detail.TodoDetailScreen
 import com.maxximum.kairos.ui.list.TodoListScreen
+import com.maxximum.kairos.ui.settings.SettingsScreen
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
+fun TodoNavHost(
+    viewModel: TodoViewModel,
+    initialTodoId: Int = -1,
+    authState: AuthUiState,
+    onLogin: (String, String) -> Unit = { _, _ -> },
+    onRegister: (String, String) -> Unit = { _, _ -> },
+    onLogout: () -> Unit = {},
+    onServerChanged: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     var selectedTodoId by remember { mutableStateOf(if (initialTodoId > 0) initialTodoId else -1) }
     var allowDetailFromClick by remember { mutableStateOf(initialTodoId > 0) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
+
+    if (showSettingsScreen) {
+        SettingsScreen(
+            onBack = { showSettingsScreen = false },
+            authState = authState,
+            onLogin = onLogin,
+            onRegister = onRegister,
+            onLogout = onLogout,
+            onServerChanged = onServerChanged
+        )
+        return
+    }
 
     val pagerState = rememberPagerState(
         initialPage = if (initialTodoId > 0) 2 else 0,
-        pageCount = { 3 }
+        pageCount = {
+            if (selectedTodoId > 0 && allowDetailFromClick) 3 else 2
+        }
     )
 
     LaunchedEffect(initialTodoId) {
@@ -85,6 +110,12 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
             if (pagerState.currentPage != 2) {
                 pagerState.scrollToPage(2)
             }
+        }
+    }
+
+    LaunchedEffect(selectedTodoId, allowDetailFromClick) {
+        if (selectedTodoId > 0 && allowDetailFromClick && pagerState.currentPage == 1) {
+            pagerState.animateScrollToPage(2)
         }
     }
 
@@ -121,6 +152,7 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
         when (page) {
             0 -> AddTodoScreen(
                 isActive = pagerState.currentPage == 0,
+                onSettings = { showSettingsScreen = true },
                 onSave = { todo ->
                     viewModel.insert(todo) { id ->
                         val savedTodo = todo.copy(id = id.toInt())
@@ -135,9 +167,14 @@ fun TodoNavHost(viewModel: TodoViewModel, initialTodoId: Int = -1) {
                 onTodoClick = { todoId ->
                     selectedTodoId = todoId
                     allowDetailFromClick = true
-                    scope.launch { pagerState.animateScrollToPage(2) }
                 },
-                onBack = { scope.launch { pagerState.animateScrollToPage(0) } }
+                onBack = { scope.launch { pagerState.animateScrollToPage(0) } },
+                authState = authState,
+                onLogin = onLogin,
+                onRegister = onRegister,
+                onLogout = onLogout,
+                onServerChanged = onServerChanged,
+                onSettings = { showSettingsScreen = true }
             )
 
             2 -> {

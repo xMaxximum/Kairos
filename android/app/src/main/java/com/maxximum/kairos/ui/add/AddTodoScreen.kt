@@ -63,7 +63,12 @@ import com.maxximum.kairos.ui.components.DebugBuildBadge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddTodoScreen(isActive: Boolean, onSave: (Todo) -> Unit, onViewAll: () -> Unit) {
+fun AddTodoScreen(
+    isActive: Boolean,
+    onSettings: () -> Unit,
+    onSave: (Todo) -> Unit,
+    onViewAll: () -> Unit
+) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var reminderTime by remember { mutableStateOf<Long?>(null) }
@@ -99,6 +104,9 @@ fun AddTodoScreen(isActive: Boolean, onSave: (Todo) -> Unit, onViewAll: () -> Un
                     }
                 },
                 actions = {
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
                     IconButton(onClick = onViewAll) {
                         Icon(Icons.AutoMirrored.Filled.List, contentDescription = "View All")
                     }

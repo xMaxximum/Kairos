@@ -16,6 +16,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import com.maxximum.kairos.app.AuthUiState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -64,19 +65,23 @@ import com.maxximum.kairos.ui.settings.SettingsScreen
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack: () -> Unit) {
+fun TodoListScreen(
+    viewModel: TodoViewModel,
+    onTodoClick: (Int) -> Unit,
+    onBack: () -> Unit,
+    authState: AuthUiState,
+    onLogin: (String, String) -> Unit = { _, _ -> },
+    onRegister: (String, String) -> Unit = { _, _ -> },
+    onLogout: () -> Unit = {},
+    onServerChanged: (String) -> Unit = {},
+    onSettings: () -> Unit = {}
+) {
     val context = LocalContext.current
     val todos by viewModel.allTodos.collectAsState(initial = emptyList())
     var selectedTodos by remember { mutableStateOf(setOf<Int>()) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var currentFilter by remember { mutableStateOf(TodoFilter.ALL) }
-    var showSettingsScreen by remember { mutableStateOf(false) }
 
-    if (showSettingsScreen) {
-        SettingsScreen(onBack = { showSettingsScreen = false })
-        return
-    }
-    
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -160,7 +165,7 @@ fun TodoListScreen(viewModel: TodoViewModel, onTodoClick: (Int) -> Unit, onBack:
                             isSelectionMode = false; selectedTodos = emptySet()
                         }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                     } else {
-                        IconButton(onClick = { showSettingsScreen = true }) {
+                        IconButton(onClick = onSettings) {
                             Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
                         var expanded by remember { mutableStateOf(false) }

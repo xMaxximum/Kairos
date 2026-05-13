@@ -1,0 +1,29 @@
+@Kairos.Api_HostAddress = http://localhost:5255
+
+POST {{Kairos.Api_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "max@example.com",
+  "password": "password1",
+  "deviceName": "local-dev"
+}
+
+###
+
+POST {{Kairos.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "max@example.com",
+  "password": "password1",
+  "deviceName": "local-dev"
+}
+
+###
+
+GET {{Kairos.Api_HostAddress}}/api/auth/me
+Accept: application/json
+Authorization: Bearer {{access_token}}
+
+###

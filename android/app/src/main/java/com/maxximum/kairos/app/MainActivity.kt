@@ -16,6 +16,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.maxximum.kairos.notifications.NotificationPreferences
@@ -32,6 +34,8 @@ class MainActivity : ComponentActivity() {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     val context = LocalContext.current
                     val viewModel: TodoViewModel = viewModel()
+                    val authViewModel: AuthViewModel = viewModel()
+                    val authState by authViewModel.uiState.collectAsState()
                     val todoIdFromIntent = intent.getIntExtra("todo_id", -1)
                     val permissionsToRequest = mutableListOf<String>()
 
@@ -52,7 +56,15 @@ class MainActivity : ComponentActivity() {
                         OverdueNotificationWorker.schedule(context, hours)
                     }
 
-                    TodoNavHost(viewModel = viewModel, initialTodoId = todoIdFromIntent)
+                    TodoNavHost(
+                        viewModel = viewModel,
+                        initialTodoId = todoIdFromIntent,
+                        authState = authState,
+                        onLogin = authViewModel::login,
+                        onRegister = authViewModel::register,
+                        onLogout = authViewModel::logout,
+                        onServerChanged = authViewModel::setApiBaseUrl
+                    )
                 }
             }
         }
