@@ -14,12 +14,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import com.maxximum.kairos.app.AuthUiState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -41,6 +43,7 @@ import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -77,13 +80,27 @@ fun TodoListScreen(
     onSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val todos by viewModel.allTodos.collectAsState(initial = emptyList())
+    val syncState by viewModel.syncState.collectAsState()
     var selectedTodos by remember { mutableStateOf(setOf<Int>()) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var currentFilter by remember { mutableStateOf(TodoFilter.ALL) }
+    var wasSyncing by remember { mutableStateOf(false) }
+    var pullDistancePx by remember { mutableFloatStateOf(0f) }
+    val pullThresholdPx = with(density) { 72.dp.toPx() }
+    val listState = rememberLazyListState()
+    val pullProgress = (pullDistancePx / pullThresholdPx).coerceIn(0f, 1f)
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val requestSync = {
+        if (authState.isAuthenticated && !authState.isLoading && !syncState.isSyncing) {
+            viewModel.syncNow()
+        } else if (!authState.isAuthenticated) {
+            ToastUtils.show(context, "Sign in to sync tasks")
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.undoEvents.collectLatest { event ->
@@ -102,6 +119,13 @@ fun TodoListScreen(
                 }
             }
         }
+    }
+
+    LaunchedEffect(syncState.isSyncing, syncState.message) {
+        if (wasSyncing && !syncState.isSyncing) {
+            ToastUtils.show(context, syncState.message ?: "Sync complete")
+        }
+        wasSyncing = syncState.isSyncing
     }
 
     val filteredTodos = remember(todos, currentFilter) {
@@ -186,20 +210,89 @@ fun TodoListScreen(
             )
         }
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.padding(innerPadding).fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 16.dp)
+        Box(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                .pointerInput(authState.isAuthenticated, authState.isLoading, syncState.isSyncing) {
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, dragAmount ->
+                            val isAtTop = listState.firstVisibleItemIndex == 0 &&
+                                listState.firstVisibleItemScrollOffset == 0
+                            if (dragAmount > 0f && isAtTop && !syncState.isSyncing) {
+                                pullDistancePx += dragAmount
+                                change.consumePositionChange()
+                            } else if (pullDistancePx > 0f && dragAmount < 0f) {
+                                pullDistancePx = (pullDistancePx + dragAmount).coerceAtLeast(0f)
+                                change.consumePositionChange()
+                            }
+                        },
+                        onDragEnd = {
+                            if (pullDistancePx >= pullThresholdPx) {
+                                requestSync()
+                            }
+                            pullDistancePx = 0f
+                        },
+                        onDragCancel = {
+                            pullDistancePx = 0f
+                        }
+                    )
+                }
         ) {
-            if (todoSections != null) {
-                todoSections.forEach { section ->
-                    stickyHeader(key = "header_${section.label}") {
-                        TodoSectionHeader(
-                            label = section.label,
-                            count = section.todos.size,
-                            isOverdue = section.label == "Overdue"
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState,
+                contentPadding = PaddingValues(bottom = 16.dp)
+            ) {
+                if (syncState.isSyncing || pullDistancePx > 0f) {
+                    item(key = "sync_status") {
+                        SyncPullStatus(
+                            text = when {
+                                syncState.isSyncing -> "Syncing tasks..."
+                                pullProgress >= 1f -> "Release to sync"
+                                else -> "Pull to sync"
+                            },
+                            showProgress = syncState.isSyncing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                         )
                     }
-                    items(section.todos, key = { it.id }) { todo ->
+                }
+
+                if (todoSections != null) {
+                    todoSections.forEach { section ->
+                        stickyHeader(key = "header_${section.label}") {
+                            TodoSectionHeader(
+                                label = section.label,
+                                count = section.todos.size,
+                                isOverdue = section.label == "Overdue"
+                            )
+                        }
+                        items(section.todos, key = { it.id }) { todo ->
+                            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                                TodoItem(
+                                    todo = todo,
+                                    isSelected = todo.id in selectedTodos,
+                                    onToggleComplete = {
+                                        val markCompleted = !todo.isCompleted
+                                        viewModel.toggleComplete(todo, markCompleted) { result ->
+                                            ToastUtils.show(context, result.message)
+                                        }
+                                    },
+                                    onClick = {
+                                        if (isSelectionMode) {
+                                            selectedTodos = if (todo.id in selectedTodos) selectedTodos - todo.id else selectedTodos + todo.id
+                                            if (selectedTodos.isEmpty()) isSelectionMode = false
+                                        } else onTodoClick(todo.id)
+                                    },
+                                    onLongClick = { isSelectionMode = true; selectedTodos = selectedTodos + todo.id }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(filteredTodos, key = { it.id }) { todo ->
                         Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                             TodoItem(
                                 todo = todo,
@@ -221,30 +314,26 @@ fun TodoListScreen(
                         }
                     }
                 }
-            } else {
-                items(filteredTodos, key = { it.id }) { todo ->
-                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                        TodoItem(
-                            todo = todo,
-                            isSelected = todo.id in selectedTodos,
-                            onToggleComplete = {
-                                val markCompleted = !todo.isCompleted
-                                viewModel.toggleComplete(todo, markCompleted) { result ->
-                                    ToastUtils.show(context, result.message)
-                                }
-                            },
-                            onClick = {
-                                if (isSelectionMode) {
-                                    selectedTodos = if (todo.id in selectedTodos) selectedTodos - todo.id else selectedTodos + todo.id
-                                    if (selectedTodos.isEmpty()) isSelectionMode = false
-                                } else onTodoClick(todo.id)
-                            },
-                            onLongClick = { isSelectionMode = true; selectedTodos = selectedTodos + todo.id }
-                        )
-                    }
-                }
             }
         }
+    }
+}
+
+@Composable
+private fun SyncPullStatus(text: String, showProgress: Boolean, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (showProgress) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

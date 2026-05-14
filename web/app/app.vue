@@ -1,0 +1,284 @@
+<script setup lang="ts">
+import {
+  Archive,
+  Check,
+  Circle,
+  Clock3,
+  LogOut,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Trash2
+} from 'lucide-vue-next'
+import type { TaskItem } from '~/types/kairos'
+
+const auth = useAuthStore()
+const tasks = useTasksStore()
+
+const authMode = ref<'login' | 'register'>('login')
+const email = ref('')
+const password = ref('')
+const title = ref('')
+const description = ref('')
+const selectedTaskId = ref<string | null>(null)
+const toast = ref('')
+
+const selectedTask = computed(() => {
+  return tasks.visibleTasks.find((task) => task.id === selectedTaskId.value) || tasks.visibleTasks[0] || null
+})
+
+const lastSyncText = computed(() => {
+  if (!tasks.lastSyncedAt) return 'Not synced yet'
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(tasks.lastSyncedAt))
+})
+
+onMounted(async () => {
+  auth.hydrate()
+  tasks.hydrate()
+  if (auth.isAuthenticated) {
+    await safeRefresh()
+  }
+})
+
+watch(
+  () => auth.isAuthenticated,
+  async (isAuthenticated) => {
+    if (isAuthenticated) {
+      await safeRefresh()
+    }
+  }
+)
+
+async function submitAuth() {
+  try {
+    if (authMode.value === 'register') {
+      await auth.register(email.value, password.value)
+    } else {
+      await auth.login(email.value, password.value)
+    }
+    showToast(auth.message)
+    await safeRefresh()
+  } catch {
+    showToast(auth.message || 'Could not sign in.')
+  }
+}
+
+async function createTask() {
+  try {
+    await tasks.createTask(title.value, description.value)
+    title.value = ''
+    description.value = ''
+    showToast('Task created.')
+  } catch (error: any) {
+    showToast(error?.message || 'Could not create task.')
+  }
+}
+
+async function safeRefresh() {
+  try {
+    await tasks.fetchTasks()
+    showToast('Tasks synced.')
+  } catch {
+    showToast(tasks.message || 'Using cached tasks.')
+  }
+}
+
+async function patch(task: TaskItem, patch: Partial<TaskItem>) {
+  try {
+    await tasks.patchTask(task, patch)
+  } catch (error: any) {
+    showToast(error?.message || 'Could not update task.')
+  }
+}
+
+async function toggleComplete(task: TaskItem) {
+  try {
+    await tasks.toggleComplete(task)
+  } catch {
+    showToast('Could not update task.')
+  }
+}
+
+async function deleteTask(task: TaskItem) {
+  try {
+    await tasks.deleteTask(task)
+    if (selectedTaskId.value === task.id) selectedTaskId.value = null
+    showToast('Task deleted.')
+  } catch {
+    showToast('Could not delete task.')
+  }
+}
+
+function logout() {
+  auth.logout()
+  selectedTaskId.value = null
+  showToast('Signed out.')
+}
+
+function showToast(message: string) {
+  toast.value = message
+  window.setTimeout(() => {
+    if (toast.value === message) toast.value = ''
+  }, 2600)
+}
+</script>
+
+<template>
+  <main class="app-shell">
+    <section class="sidebar">
+      <div class="brand-row">
+        <div>
+          <p class="eyebrow">Kairos</p>
+          <h1>Tasks</h1>
+        </div>
+        <button v-if="auth.isAuthenticated" class="icon-button" type="button" title="Refresh" @click="safeRefresh">
+          <RefreshCw :size="18" :class="{ spinning: tasks.isLoading }" />
+        </button>
+      </div>
+
+      <form v-if="!auth.isAuthenticated" class="auth-panel" @submit.prevent="submitAuth">
+        <div class="segmented">
+          <button type="button" :class="{ active: authMode === 'login' }" @click="authMode = 'login'">Login</button>
+          <button type="button" :class="{ active: authMode === 'register' }" @click="authMode = 'register'">Register</button>
+        </div>
+        <label>
+          Email
+          <input v-model="email" type="email" autocomplete="email" required>
+        </label>
+        <label>
+          Password
+          <input
+            v-model="password"
+            type="password"
+            autocomplete="current-password"
+            minlength="8"
+            required
+          >
+        </label>
+        <button class="primary-button" type="submit" :disabled="auth.isLoading">
+          {{ auth.isLoading ? 'Working...' : authMode === 'register' ? 'Create account' : 'Login' }}
+        </button>
+        <p class="muted">The web app uses the same account and API as Android.</p>
+      </form>
+
+      <template v-else>
+        <div class="account-row">
+          <span>{{ auth.user?.email }}</span>
+          <button class="text-button" type="button" @click="logout">
+            <LogOut :size="15" />
+            Logout
+          </button>
+        </div>
+
+        <form class="create-panel" @submit.prevent="createTask">
+          <label>
+            New task
+            <input v-model="title" placeholder="What needs doing?" required>
+          </label>
+          <textarea v-model="description" rows="3" placeholder="Notes or details" />
+          <button class="primary-button" type="submit" :disabled="tasks.isSaving">
+            <Plus :size="17" />
+            {{ tasks.isSaving ? 'Saving...' : 'Add task' }}
+          </button>
+        </form>
+
+        <div class="filter-grid">
+          <button :class="{ active: tasks.filter === 'active' }" @click="tasks.filter = 'active'">
+            Active <span>{{ tasks.counts.active }}</span>
+          </button>
+          <button :class="{ active: tasks.filter === 'pending' }" @click="tasks.filter = 'pending'">
+            Pending <span>{{ tasks.counts.pending }}</span>
+          </button>
+          <button :class="{ active: tasks.filter === 'done' }" @click="tasks.filter = 'done'">
+            Done <span>{{ tasks.counts.done }}</span>
+          </button>
+          <button :class="{ active: tasks.filter === 'archived' }" @click="tasks.filter = 'archived'">
+            Archived <span>{{ tasks.counts.archived }}</span>
+          </button>
+        </div>
+      </template>
+    </section>
+
+    <section class="task-surface">
+      <div class="surface-header">
+        <div>
+          <h2>{{ auth.isAuthenticated ? 'Task list' : 'Offline cache' }}</h2>
+          <p>{{ auth.isAuthenticated ? `Last sync: ${lastSyncText}` : 'Sign in to load your tasks.' }}</p>
+        </div>
+        <button v-if="auth.isAuthenticated" class="secondary-button" type="button" @click="safeRefresh">
+          <RefreshCw :size="16" />
+          Sync
+        </button>
+      </div>
+
+      <div v-if="!auth.isAuthenticated && tasks.visibleTasks.length === 0" class="empty-state">
+        <Clock3 :size="28" />
+        <p>Login or register to use Kairos on the web.</p>
+      </div>
+
+      <div v-else class="task-layout">
+        <div class="task-list" aria-label="Tasks">
+          <button
+            v-for="task in tasks.visibleTasks"
+            :key="task.id"
+            type="button"
+            class="task-row"
+            :class="{ selected: selectedTask?.id === task.id, done: task.isCompleted }"
+            @click="selectedTaskId = task.id"
+          >
+            <span class="checkmark">
+              <Check v-if="task.isCompleted" :size="15" />
+              <Circle v-else :size="15" />
+            </span>
+            <span class="task-row-copy">
+              <strong>{{ task.title }}</strong>
+              <small>{{ task.description || 'No description' }}</small>
+            </span>
+            <span v-if="task.isArchived" class="tag">Archived</span>
+          </button>
+          <div v-if="auth.isAuthenticated && tasks.visibleTasks.length === 0" class="empty-state compact">
+            <p>No tasks in this view.</p>
+          </div>
+        </div>
+
+        <aside v-if="selectedTask" class="detail-panel">
+          <label>
+            Title
+            <input :value="selectedTask.title" @change="patch(selectedTask, { title: ($event.target as HTMLInputElement).value })">
+          </label>
+          <label>
+            Description
+            <textarea
+              :value="selectedTask.description"
+              rows="8"
+              @change="patch(selectedTask, { description: ($event.target as HTMLTextAreaElement).value })"
+            />
+          </label>
+          <div class="detail-actions">
+            <button class="secondary-button" type="button" @click="toggleComplete(selectedTask)">
+              <Check :size="16" />
+              {{ selectedTask.isCompleted ? 'Mark pending' : 'Complete' }}
+            </button>
+            <button class="secondary-button" type="button" @click="tasks.archiveTask(selectedTask)">
+              <Archive :size="16" />
+              {{ selectedTask.isArchived ? 'Unarchive' : 'Archive' }}
+            </button>
+            <button class="danger-button" type="button" @click="deleteTask(selectedTask)">
+              <Trash2 :size="16" />
+              Delete
+            </button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <Transition name="toast">
+      <div v-if="toast" class="toast">{{ toast }}</div>
+    </Transition>
+  </main>
+</template>

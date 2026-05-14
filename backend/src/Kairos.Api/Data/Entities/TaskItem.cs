@@ -3,6 +3,7 @@ namespace Kairos.Api.Data.Entities;
 public sealed class TaskItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ClientId { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }
     public ApplicationUser User { get; set; } = null!;
     public string Title { get; set; } = string.Empty;

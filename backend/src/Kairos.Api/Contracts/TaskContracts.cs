@@ -2,6 +2,7 @@ namespace Kairos.Api.Contracts;
 
 public sealed record TaskResponse(
     Guid Id,
+    Guid ClientId,
     string Title,
     string Description,
     DateTimeOffset CreatedAt,
@@ -17,6 +18,7 @@ public sealed record TaskResponse(
     bool IsOneOffTask);
 
 public sealed record CreateTaskRequest(
+    Guid? ClientId,
     string Title,
     string? Description,
     DateTimeOffset? ReminderTime,

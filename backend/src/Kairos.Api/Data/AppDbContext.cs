@@ -18,9 +18,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             entity.ToTable("tasks");
             entity.HasKey(task => task.Id);
+            entity.Property(task => task.ClientId).IsRequired();
             entity.Property(task => task.Title).HasMaxLength(240).IsRequired();
             entity.Property(task => task.Description).HasDefaultValue(string.Empty);
             entity.Property(task => task.Recurrence).HasMaxLength(32).HasDefaultValue("NONE");
+            entity.HasIndex(task => new { task.UserId, task.ClientId }).IsUnique();
             entity.HasIndex(task => new { task.UserId, task.UpdatedAt });
             entity.HasIndex(task => new { task.UserId, task.DeletedAt });
             entity.HasOne(task => task.User)

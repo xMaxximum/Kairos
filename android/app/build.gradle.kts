@@ -21,7 +21,7 @@ val releaseKeyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: "maxximum_key"
 val hasReleaseSigning = releaseKeystoreFile.exists() && !releaseStorePassword.isNullOrBlank()
 val apiBaseUrl = providers.gradleProperty("kairosApiBaseUrl")
     .orElse(providers.environmentVariable("KAIROS_API_BASE_URL"))
-    .orElse("http://10.10.1.58:8080/")
+    .orElse("https://todo.tweetwhale.com/")
 
 android {
     namespace = "com.maxximum.kairos"

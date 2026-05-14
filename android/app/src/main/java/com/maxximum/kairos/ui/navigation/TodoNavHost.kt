@@ -83,6 +83,7 @@ fun TodoNavHost(
     var selectedTodoId by remember { mutableStateOf(if (initialTodoId > 0) initialTodoId else -1) }
     var allowDetailFromClick by remember { mutableStateOf(initialTodoId > 0) }
     var showSettingsScreen by remember { mutableStateOf(false) }
+    val syncState by viewModel.syncState.collectAsState()
 
     if (showSettingsScreen) {
         SettingsScreen(
@@ -91,7 +92,14 @@ fun TodoNavHost(
             onLogin = onLogin,
             onRegister = onRegister,
             onLogout = onLogout,
-            onServerChanged = onServerChanged
+            onServerChanged = onServerChanged,
+            onExportBackup = { uri ->
+                viewModel.exportBackup(uri) { _, message ->
+                    ToastUtils.show(context, message)
+                }
+            },
+            syncState = syncState,
+            onSyncNow = viewModel::syncNow
         )
         return
     }

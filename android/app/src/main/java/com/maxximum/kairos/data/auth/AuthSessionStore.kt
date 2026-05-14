@@ -28,6 +28,8 @@ class AuthSessionStore(context: Context) {
 
     fun accessToken(): String? = prefs.getString(KEY_ACCESS_TOKEN, null)
 
+    fun refreshToken(): String? = prefs.getString(KEY_REFRESH_TOKEN, null)
+
     fun clear() {
         prefs.edit().clear().apply()
     }

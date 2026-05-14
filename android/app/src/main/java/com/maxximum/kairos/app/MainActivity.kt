@@ -20,6 +20,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maxximum.kairos.data.sync.TodoSyncWorker
 import com.maxximum.kairos.notifications.NotificationPreferences
 import com.maxximum.kairos.notifications.OverdueNotificationWorker
 import com.maxximum.kairos.ui.navigation.TodoNavHost
@@ -54,6 +55,8 @@ class MainActivity : ComponentActivity() {
                         checkExactAlarmPermission(context)
                         val hours = NotificationPreferences.getOverdueIntervalHours(context)
                         OverdueNotificationWorker.schedule(context, hours)
+                        TodoSyncWorker.schedulePeriodic(context)
+                        TodoSyncWorker.enqueueNow(context)
                     }
 
                     TodoNavHost(

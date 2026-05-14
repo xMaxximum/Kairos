@@ -174,7 +174,7 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                     }
                     .padding(24.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.Top) {
                     Checkbox(checked = currentTodo.isCompleted, onCheckedChange = { 
                         viewModel.toggleComplete(currentTodo, it) { result ->
                             ToastUtils.show(context, result.message)
@@ -188,13 +188,16 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                         onValueChange = { titleDraft = it },
                         modifier = Modifier
                             .weight(1f)
+                            .heightIn(min = 64.dp, max = 180.dp)
                             .pointerInput(Unit) {
                                 detectHorizontalDragGestures { change, _ ->
                                     change.consumePositionChange()
                                 }
                             },
                         label = { Text("Title") },
-                        singleLine = true,
+                        singleLine = false,
+                        minLines = 1,
+                        maxLines = 4,
                         textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                     )
                 }

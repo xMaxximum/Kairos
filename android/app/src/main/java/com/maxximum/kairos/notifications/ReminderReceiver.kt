@@ -12,6 +12,7 @@ import com.maxximum.kairos.app.FullScreenReminderActivity
 import com.maxximum.kairos.app.MainActivity
 import com.maxximum.kairos.app.PostponeActivity
 import com.maxximum.kairos.data.local.AppDatabase
+import com.maxximum.kairos.data.local.LocalTodoRepository
 import com.maxximum.kairos.domain.logic.applyTodoCompletion
 import com.maxximum.kairos.platform.ToastUtils
 import com.maxximum.kairos.platform.canUseFullScreenIntentPermission
@@ -57,14 +58,15 @@ class ReminderReceiver : BroadcastReceiver() {
 
     private fun markAsDone(context: Context, todoId: Int) {
         val dao = AppDatabase.getDatabase(context).todoDao()
+        val repository = LocalTodoRepository(dao)
         CoroutineScope(Dispatchers.IO).launch {
-            dao.getTodoById(todoId)?.let {
+            repository.getTodoById(todoId)?.let {
                 applyTodoCompletion(
                     context = context,
                     todo = it,
                     markCompleted = true,
-                    updateTodo = { updated -> dao.updateTodo(updated) },
-                    deleteTodo = { updated -> dao.deleteTodo(updated) }
+                    updateTodo = { updated -> repository.updateTodo(updated) },
+                    deleteTodo = { updated -> repository.deleteTodo(updated) }
                 )
             }
         }

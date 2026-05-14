@@ -45,6 +45,15 @@ class AuthApi(
         )
     }
 
+    suspend fun refresh(refreshToken: String, deviceName: String): AuthTokens {
+        return authRequest(
+            path = "api/auth/refresh",
+            body = JSONObject()
+                .put("refreshToken", refreshToken)
+                .put("deviceName", deviceName)
+        )
+    }
+
     suspend fun me(accessToken: String): AuthUser = withContext(Dispatchers.IO) {
         val connection = openConnection("api/auth/me").apply {
             requestMethod = "GET"

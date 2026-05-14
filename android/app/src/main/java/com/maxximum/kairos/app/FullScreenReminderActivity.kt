@@ -51,6 +51,7 @@ import com.maxximum.kairos.ui.theme.KairosTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.maxximum.kairos.data.local.LocalTodoRepository
 
 class FullScreenReminderActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,14 +106,15 @@ class FullScreenReminderActivity : ComponentActivity() {
         }
         lifecycleScope.launch(Dispatchers.IO) {
             val dao = AppDatabase.getDatabase(this@FullScreenReminderActivity).todoDao()
-            val todo = dao.getTodoById(todoId)
+            val repository = LocalTodoRepository(dao)
+            val todo = repository.getTodoById(todoId)
             if (todo != null) {
                 val result = applyTodoCompletion(
                     context = this@FullScreenReminderActivity,
                     todo = todo,
                     markCompleted = true,
-                    updateTodo = { dao.updateTodo(it) },
-                    deleteTodo = { dao.deleteTodo(it) }
+                    updateTodo = { repository.updateTodo(it) },
+                    deleteTodo = { repository.deleteTodo(it) }
                 )
                 val manager = getSystemService(NotificationManager::class.java)
                 manager.cancel(todoId)
@@ -136,10 +138,11 @@ class FullScreenReminderActivity : ComponentActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             val dao = AppDatabase.getDatabase(this@FullScreenReminderActivity).todoDao()
-            val todo = dao.getTodoById(todoId)
+            val repository = LocalTodoRepository(dao)
+            val todo = repository.getTodoById(todoId)
             if (todo != null) {
                 val updated = todo.copy(reminderTime = time, isCompleted = false)
-                dao.updateTodo(updated)
+                repository.updateTodo(updated)
                 AlarmScheduler.schedule(this@FullScreenReminderActivity, updated)
                 val manager = getSystemService(NotificationManager::class.java)
                 manager.cancel(todoId)

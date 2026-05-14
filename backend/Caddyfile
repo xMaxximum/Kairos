@@ -1,0 +1,7 @@
+todo.tweetwhale.com {
+	encode zstd gzip
+
+	@api path /api/*
+	reverse_proxy @api api:8080
+	reverse_proxy web:3000
+}

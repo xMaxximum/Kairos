@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.maxximum.kairos.data.auth.ApiServerStore
 import com.maxximum.kairos.data.auth.AuthSessionStore
 import com.maxximum.kairos.data.remote.AuthApi
+import com.maxximum.kairos.data.sync.TodoSyncWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -87,6 +88,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     apiBaseUrl = apiServerStore.getBaseUrl(),
                     message = if (isRegister) "Account created." else "Signed in."
                 )
+                TodoSyncWorker.enqueueNow(getApplication())
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,

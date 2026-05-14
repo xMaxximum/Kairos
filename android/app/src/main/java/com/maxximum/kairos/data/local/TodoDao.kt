@@ -6,13 +6,25 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TodoDao {
-    @Query("SELECT * FROM todos ORDER BY timestamp DESC")
+    @Query("SELECT * FROM todos WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     fun getAllTodos(): Flow<List<Todo>>
 
-    @Query("SELECT * FROM todos WHERE id = :id")
+    @Query("SELECT * FROM todos WHERE deletedAt IS NULL ORDER BY timestamp DESC")
+    suspend fun getAllTodosSnapshot(): List<Todo>
+
+    @Query("SELECT * FROM todos WHERE syncStatus != 'SYNCED' OR serverId IS NULL")
+    suspend fun getPendingSyncTodos(): List<Todo>
+
+    @Query("SELECT COUNT(*) FROM todos WHERE syncStatus != 'SYNCED' OR serverId IS NULL")
+    suspend fun getPendingSyncCount(): Int
+
+    @Query("SELECT * FROM todos WHERE id = :id AND deletedAt IS NULL")
     suspend fun getTodoById(id: Int): Todo?
 
-    @Query("SELECT * FROM todos WHERE id = :id")
+    @Query("SELECT * FROM todos WHERE clientId = :clientId")
+    suspend fun getTodoByClientId(clientId: String): Todo?
+
+    @Query("SELECT * FROM todos WHERE id = :id AND deletedAt IS NULL")
     fun observeTodoById(id: Int): Flow<Todo?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

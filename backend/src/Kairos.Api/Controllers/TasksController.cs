@@ -14,14 +14,22 @@ namespace Kairos.Api.Controllers;
 public sealed class TasksController(AppDbContext dbContext) : ControllerBase
 {
     [HttpGet]
-    public async Task<IReadOnlyList<TaskResponse>> GetTasks(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TaskResponse>> GetTasks(
+        [FromQuery] bool includeDeleted = false,
+        CancellationToken cancellationToken = default)
     {
         var userId = GetCurrentUserId();
-        return await dbContext.Tasks
-            .Where(task => task.UserId == userId && task.DeletedAt == null)
+        var query = dbContext.Tasks.Where(task => task.UserId == userId);
+        if (!includeDeleted)
+        {
+            query = query.Where(task => task.DeletedAt == null);
+        }
+
+        return await query
             .OrderByDescending(task => task.UpdatedAt)
             .Select(task => new TaskResponse(
                 task.Id,
+                task.ClientId,
                 task.Title,
                 task.Description,
                 task.CreatedAt,
@@ -46,10 +54,28 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
             return BadRequest(new { error = "Title is required." });
         }
 
+        var userId = GetCurrentUserId();
+        var clientId = request.ClientId ?? Guid.NewGuid();
+        var existing = await dbContext.Tasks.SingleOrDefaultAsync(
+            task => task.UserId == userId && task.ClientId == clientId,
+            cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.DeletedAt is not null)
+            {
+                return Conflict(new { error = "Task is deleted. Restore it before updating." });
+            }
+            ApplyRequest(existing, request);
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return Ok(ToResponse(existing));
+        }
+
         var now = DateTimeOffset.UtcNow;
         var task = new TaskItem
         {
-            UserId = GetCurrentUserId(),
+            UserId = userId,
+            ClientId = clientId,
             Title = request.Title.Trim(),
             Description = request.Description?.Trim() ?? string.Empty,
             CreatedAt = now,
@@ -127,6 +153,25 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
         return NoContent();
     }
 
+    [HttpDelete("client/{clientId:guid}")]
+    public async Task<IActionResult> DeleteTaskByClientId(Guid clientId, CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        var task = await dbContext.Tasks.SingleOrDefaultAsync(
+            task => task.UserId == userId && task.ClientId == clientId,
+            cancellationToken);
+        if (task is null)
+        {
+            return NotFound();
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        task.DeletedAt = now;
+        task.UpdatedAt = now;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
     private Task<TaskItem?> FindUserTask(Guid id, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
@@ -149,10 +194,25 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
         return normalized is "NONE" or "DAILY" or "WEEKLY" ? normalized : "NONE";
     }
 
+    private static void ApplyRequest(TaskItem task, CreateTaskRequest request)
+    {
+        task.Title = request.Title.Trim();
+        task.Description = request.Description?.Trim() ?? string.Empty;
+        task.ReminderTime = request.ReminderTime;
+        task.Recurrence = NormalizeRecurrence(request.Recurrence);
+        task.IsHighPriority = request.IsHighPriority;
+        task.IsFullScreenReminder = request.IsFullScreenReminder;
+        task.Attachments = request.Attachments?.ToList() ?? [];
+        task.IsCompleted = request.IsCompleted;
+        task.IsArchived = request.IsArchived;
+        task.IsOneOffTask = request.IsOneOffTask;
+    }
+
     private static TaskResponse ToResponse(TaskItem task)
     {
         return new TaskResponse(
             task.Id,
+            task.ClientId,
             task.Title,
             task.Description,
             task.CreatedAt,

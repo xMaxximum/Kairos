@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kairos}
+      POSTGRES_USER: ${POSTGRES_USER:-kairos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}
+    volumes:
+      - kairos-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kairos} -d ${POSTGRES_DB:-kairos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./src/Kairos.Api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-kairos};Username=${POSTGRES_USER:-kairos};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in backend/.env}
+      Jwt__Issuer: ${JWT_ISSUER:-Kairos}
+      Jwt__Audience: ${JWT_AUDIENCE:-KairosClients}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in backend/.env}
+      Jwt__AccessTokenMinutes: 15
+      Jwt__RefreshTokenDays: 60
+      Database__ApplyMigrationsOnStartup: true
+      Cors__AllowedOrigins__0: ${CORS_ORIGIN_0:-https://todo.tweetwhale.com}
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../web
+    restart: unless-stopped
+    environment:
+      NUXT_PUBLIC_API_BASE: /api
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+      - web
+
+volumes:
+  kairos-postgres:
+  caddy-data:
+  caddy-config:
