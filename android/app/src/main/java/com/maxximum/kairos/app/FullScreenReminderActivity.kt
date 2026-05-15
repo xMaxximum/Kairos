@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.maxximum.kairos.data.local.AppDatabase
+import com.maxximum.kairos.data.sync.TodoSyncWorker
 import com.maxximum.kairos.domain.logic.applyTodoCompletion
 import com.maxximum.kairos.notifications.AlarmScheduler
 import com.maxximum.kairos.platform.ToastUtils
@@ -118,6 +119,7 @@ class FullScreenReminderActivity : ComponentActivity() {
                 )
                 val manager = getSystemService(NotificationManager::class.java)
                 manager.cancel(todoId)
+                TodoSyncWorker.enqueueNow(this@FullScreenReminderActivity)
                 withContext(Dispatchers.Main) {
                     ToastUtils.show(this@FullScreenReminderActivity, result.message)
                     finish()
@@ -144,6 +146,7 @@ class FullScreenReminderActivity : ComponentActivity() {
                 val updated = todo.copy(reminderTime = time, isCompleted = false)
                 repository.updateTodo(updated)
                 AlarmScheduler.schedule(this@FullScreenReminderActivity, updated)
+                TodoSyncWorker.enqueueNow(this@FullScreenReminderActivity)
                 val manager = getSystemService(NotificationManager::class.java)
                 manager.cancel(todoId)
                 withContext(Dispatchers.Main) {

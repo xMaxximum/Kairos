@@ -9,7 +9,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.maxximum.kairos.domain.model.Todo
 
-@Database(entities = [Todo::class], version = 6, exportSchema = false)
+@Database(entities = [Todo::class], version = 7, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun todoDao(): TodoDao
@@ -60,13 +60,28 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE todos ADD COLUMN remoteUpdatedAt INTEGER")
+                db.execSQL(
+                    """
+                    UPDATE todos
+                    SET remoteUpdatedAt = updatedAt
+                    WHERE serverId IS NOT NULL
+                        AND syncStatus = 'SYNCED'
+                        AND updatedAt > 0
+                    """.trimIndent()
+                )
+            }
+        }
+
         @Volatile
         private var Instance: AppDatabase? = null
 
         fun getDatabase(context: Context): AppDatabase {
             return Instance ?: synchronized(this) {
                 Room.databaseBuilder(context, AppDatabase::class.java, "todo_database")
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build()
                     .also { Instance = it }
             }

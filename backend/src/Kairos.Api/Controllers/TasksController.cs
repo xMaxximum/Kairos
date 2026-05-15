@@ -63,8 +63,22 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
         {
             if (existing.DeletedAt is not null)
             {
-                return Conflict(new { error = "Task is deleted. Restore it before updating." });
+                return TaskConflict(
+                    existing,
+                    "task_deleted",
+                    "Task is deleted. Restore it before updating.");
             }
+            var matchesExisting = MatchesRequest(existing, request);
+            if (!matchesExisting)
+            {
+                var conflict = ValidateBaseUpdatedAt(existing, request.BaseUpdatedAt);
+                if (conflict is not null) return conflict;
+            }
+            else if (request.BaseUpdatedAt is null)
+            {
+                return Ok(ToResponse(existing));
+            }
+
             ApplyRequest(existing, request);
             existing.UpdatedAt = DateTimeOffset.UtcNow;
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -114,6 +128,9 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
             return NotFound();
         }
 
+        var conflict = ValidateBaseUpdatedAt(task, request.BaseUpdatedAt);
+        if (conflict is not null) return conflict;
+
         if (request.Title is not null)
         {
             if (string.IsNullOrWhiteSpace(request.Title))
@@ -138,23 +155,37 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    public async Task<IActionResult> DeleteTask(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<TaskResponse>> DeleteTask(
+        Guid id,
+        [FromQuery] DateTimeOffset? baseUpdatedAt,
+        CancellationToken cancellationToken)
     {
-        var task = await FindUserTask(id, cancellationToken);
+        var task = await FindUserTaskIncludingDeleted(id, cancellationToken);
         if (task is null)
         {
             return NotFound();
+        }
+
+        var conflict = ValidateBaseUpdatedAt(task, baseUpdatedAt);
+        if (conflict is not null) return conflict;
+
+        if (task.DeletedAt is not null)
+        {
+            return Ok(ToResponse(task));
         }
 
         var now = DateTimeOffset.UtcNow;
         task.DeletedAt = now;
         task.UpdatedAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return NoContent();
+        return Ok(ToResponse(task));
     }
 
     [HttpDelete("client/{clientId:guid}")]
-    public async Task<IActionResult> DeleteTaskByClientId(Guid clientId, CancellationToken cancellationToken)
+    public async Task<ActionResult<TaskResponse>> DeleteTaskByClientId(
+        Guid clientId,
+        [FromQuery] DateTimeOffset? baseUpdatedAt,
+        CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         var task = await dbContext.Tasks.SingleOrDefaultAsync(
@@ -165,11 +196,49 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
             return NotFound();
         }
 
+        var conflict = ValidateBaseUpdatedAt(task, baseUpdatedAt);
+        if (conflict is not null) return conflict;
+
+        if (task.DeletedAt is not null)
+        {
+            return Ok(ToResponse(task));
+        }
+
         var now = DateTimeOffset.UtcNow;
         task.DeletedAt = now;
         task.UpdatedAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return NoContent();
+        return Ok(ToResponse(task));
+    }
+
+    [HttpPost("client/{clientId:guid}/restore")]
+    public async Task<ActionResult<TaskResponse>> RestoreTaskByClientId(
+        Guid clientId,
+        RestoreTaskRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            return BadRequest(new { error = "Title is required." });
+        }
+
+        var userId = GetCurrentUserId();
+        var task = await dbContext.Tasks.SingleOrDefaultAsync(
+            task => task.UserId == userId && task.ClientId == clientId,
+            cancellationToken);
+        if (task is null)
+        {
+            return NotFound();
+        }
+
+        var conflict = ValidateBaseUpdatedAt(task, request.BaseUpdatedAt);
+        if (conflict is not null) return conflict;
+
+        ApplyRestoreRequest(task, request);
+        task.DeletedAt = null;
+        task.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(ToResponse(task));
     }
 
     private Task<TaskItem?> FindUserTask(Guid id, CancellationToken cancellationToken)
@@ -177,6 +246,14 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
         var userId = GetCurrentUserId();
         return dbContext.Tasks.SingleOrDefaultAsync(
             task => task.Id == id && task.UserId == userId && task.DeletedAt == null,
+            cancellationToken);
+    }
+
+    private Task<TaskItem?> FindUserTaskIncludingDeleted(Guid id, CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        return dbContext.Tasks.SingleOrDefaultAsync(
+            task => task.Id == id && task.UserId == userId,
             cancellationToken);
     }
 
@@ -206,6 +283,66 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
         task.IsCompleted = request.IsCompleted;
         task.IsArchived = request.IsArchived;
         task.IsOneOffTask = request.IsOneOffTask;
+    }
+
+    private static void ApplyRestoreRequest(TaskItem task, RestoreTaskRequest request)
+    {
+        task.Title = request.Title.Trim();
+        task.Description = request.Description?.Trim() ?? string.Empty;
+        task.ReminderTime = request.ReminderTime;
+        task.Recurrence = NormalizeRecurrence(request.Recurrence);
+        task.IsHighPriority = request.IsHighPriority;
+        task.IsFullScreenReminder = request.IsFullScreenReminder;
+        task.Attachments = request.Attachments?.ToList() ?? [];
+        task.IsCompleted = request.IsCompleted;
+        task.IsArchived = request.IsArchived;
+        task.IsOneOffTask = request.IsOneOffTask;
+    }
+
+    private static bool MatchesRequest(TaskItem task, CreateTaskRequest request)
+    {
+        return task.Title == request.Title.Trim()
+            && task.Description == (request.Description?.Trim() ?? string.Empty)
+            && SameInstant(task.ReminderTime, request.ReminderTime)
+            && task.Recurrence == NormalizeRecurrence(request.Recurrence)
+            && task.IsHighPriority == request.IsHighPriority
+            && task.IsFullScreenReminder == request.IsFullScreenReminder
+            && task.Attachments.SequenceEqual(request.Attachments ?? [])
+            && task.IsCompleted == request.IsCompleted
+            && task.IsArchived == request.IsArchived
+            && task.IsOneOffTask == request.IsOneOffTask;
+    }
+
+    private ActionResult<TaskResponse>? ValidateBaseUpdatedAt(TaskItem task, DateTimeOffset? baseUpdatedAt)
+    {
+        if (baseUpdatedAt is null)
+        {
+            return TaskConflict(
+                task,
+                "task_conflict",
+                "baseUpdatedAt is required when modifying an existing task.");
+        }
+
+        if (task.UpdatedAt.ToUnixTimeMilliseconds() != baseUpdatedAt.Value.ToUnixTimeMilliseconds())
+        {
+            return TaskConflict(
+                task,
+                "task_conflict",
+                "Task has changed on the server. Refresh before updating.");
+        }
+
+        return null;
+    }
+
+    private ActionResult<TaskResponse> TaskConflict(TaskItem task, string code, string error)
+    {
+        return Conflict(new TaskConflictResponse(code, error, ToResponse(task)));
+    }
+
+    private static bool SameInstant(DateTimeOffset? left, DateTimeOffset? right)
+    {
+        if (left is null || right is null) return left is null && right is null;
+        return left.Value.ToUnixTimeMilliseconds() == right.Value.ToUnixTimeMilliseconds();
     }
 
     private static TaskResponse ToResponse(TaskItem task)

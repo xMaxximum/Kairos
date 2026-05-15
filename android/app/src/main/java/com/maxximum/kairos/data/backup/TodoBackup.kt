@@ -6,7 +6,7 @@ import com.google.gson.GsonBuilder
 import com.maxximum.kairos.domain.model.Todo
 
 data class TodoBackupFile(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val exportedAtMillis: Long = System.currentTimeMillis(),
     val todos: List<TodoBackupItem>
 )
@@ -15,6 +15,7 @@ data class TodoBackupItem(
     val localId: Int,
     val clientId: String,
     val serverId: String?,
+    val remoteUpdatedAt: Long?,
     val title: String,
     val description: String,
     val timestamp: Long,
@@ -53,6 +54,7 @@ private fun Todo.toBackupItem(): TodoBackupItem {
         localId = id,
         clientId = clientId,
         serverId = serverId,
+        remoteUpdatedAt = remoteUpdatedAt,
         title = title,
         description = description,
         timestamp = timestamp,

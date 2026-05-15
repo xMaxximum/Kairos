@@ -7,6 +7,7 @@ import {
   LogOut,
   Plus,
   RefreshCw,
+  Star,
   RotateCcw,
   Trash2
 } from 'lucide-vue-next'
@@ -20,6 +21,11 @@ const email = ref('')
 const password = ref('')
 const title = ref('')
 const description = ref('')
+const reminderLocal = ref('')
+const recurrence = ref('NONE')
+const isHighPriority = ref(false)
+const isFullScreenReminder = ref(false)
+const isOneOffTask = ref(false)
 const selectedTaskId = ref<string | null>(null)
 const toast = ref('')
 
@@ -70,9 +76,22 @@ async function submitAuth() {
 
 async function createTask() {
   try {
-    await tasks.createTask(title.value, description.value)
+    await tasks.createTask({
+      title: title.value,
+      description: description.value,
+      reminderTime: toIsoOrNull(reminderLocal.value),
+      recurrence: recurrence.value,
+      isHighPriority: isHighPriority.value,
+      isFullScreenReminder: isFullScreenReminder.value,
+      isOneOffTask: isOneOffTask.value
+    })
     title.value = ''
     description.value = ''
+    reminderLocal.value = ''
+    recurrence.value = 'NONE'
+    isHighPriority.value = false
+    isFullScreenReminder.value = false
+    isOneOffTask.value = false
     showToast('Task created.')
   } catch (error: any) {
     showToast(error?.message || 'Could not create task.')
@@ -104,6 +123,14 @@ async function toggleComplete(task: TaskItem) {
   }
 }
 
+async function archiveTask(task: TaskItem) {
+  try {
+    await tasks.archiveTask(task)
+  } catch {
+    showToast('Could not update task.')
+  }
+}
+
 async function deleteTask(task: TaskItem) {
   try {
     await tasks.deleteTask(task)
@@ -125,6 +152,28 @@ function showToast(message: string) {
   window.setTimeout(() => {
     if (toast.value === message) toast.value = ''
   }, 2600)
+}
+
+function toLocalDateTimeValue(iso: string | null) {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const offsetMs = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
+function toIsoOrNull(value: string) {
+  return value ? new Date(value).toISOString() : null
+}
+
+function formatReminder(iso: string | null) {
+  if (!iso) return ''
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(iso))
 }
 </script>
 
@@ -181,6 +230,34 @@ function showToast(message: string) {
             <input v-model="title" placeholder="What needs doing?" required>
           </label>
           <textarea v-model="description" rows="3" placeholder="Notes or details" />
+          <div class="field-grid">
+            <label>
+              Reminder
+              <input v-model="reminderLocal" type="datetime-local">
+            </label>
+            <label>
+              Repeat
+              <select v-model="recurrence">
+                <option value="NONE">None</option>
+                <option value="DAILY">Daily</option>
+                <option value="WEEKLY">Weekly</option>
+              </select>
+            </label>
+          </div>
+          <div class="toggle-list">
+            <label class="check-row">
+              <input v-model="isHighPriority" type="checkbox">
+              High priority
+            </label>
+            <label class="check-row">
+              <input v-model="isFullScreenReminder" type="checkbox">
+              Full-screen reminder
+            </label>
+            <label class="check-row">
+              <input v-model="isOneOffTask" type="checkbox">
+              Delete after completion
+            </label>
+          </div>
           <button class="primary-button" type="submit" :disabled="tasks.isSaving">
             <Plus :size="17" />
             {{ tasks.isSaving ? 'Saving...' : 'Add task' }}
@@ -238,8 +315,18 @@ function showToast(message: string) {
             <span class="task-row-copy">
               <strong>{{ task.title }}</strong>
               <small>{{ task.description || 'No description' }}</small>
+              <span class="meta-line">
+                <span v-if="task.reminderTime">{{ formatReminder(task.reminderTime) }}</span>
+                <span v-if="task.recurrence !== 'NONE'">{{ task.recurrence.toLowerCase() }}</span>
+              </span>
             </span>
-            <span v-if="task.isArchived" class="tag">Archived</span>
+            <span class="row-tags">
+              <span v-if="task.isHighPriority" class="tag priority">
+                <Star :size="12" />
+                High
+              </span>
+              <span v-if="task.isArchived" class="tag">Archived</span>
+            </span>
           </button>
           <div v-if="auth.isAuthenticated && tasks.visibleTasks.length === 0" class="empty-state compact">
             <p>No tasks in this view.</p>
@@ -259,12 +346,59 @@ function showToast(message: string) {
               @change="patch(selectedTask, { description: ($event.target as HTMLTextAreaElement).value })"
             />
           </label>
+          <div class="field-grid">
+            <label>
+              Reminder
+              <input
+                type="datetime-local"
+                :value="toLocalDateTimeValue(selectedTask.reminderTime)"
+                @change="patch(selectedTask, { reminderTime: toIsoOrNull(($event.target as HTMLInputElement).value) })"
+              >
+            </label>
+            <label>
+              Repeat
+              <select
+                :value="selectedTask.recurrence"
+                @change="patch(selectedTask, { recurrence: ($event.target as HTMLSelectElement).value })"
+              >
+                <option value="NONE">None</option>
+                <option value="DAILY">Daily</option>
+                <option value="WEEKLY">Weekly</option>
+              </select>
+            </label>
+          </div>
+          <div class="toggle-list">
+            <label class="check-row">
+              <input
+                type="checkbox"
+                :checked="selectedTask.isHighPriority"
+                @change="patch(selectedTask, { isHighPriority: ($event.target as HTMLInputElement).checked })"
+              >
+              High priority
+            </label>
+            <label class="check-row">
+              <input
+                type="checkbox"
+                :checked="selectedTask.isFullScreenReminder"
+                @change="patch(selectedTask, { isFullScreenReminder: ($event.target as HTMLInputElement).checked })"
+              >
+              Full-screen reminder
+            </label>
+            <label class="check-row">
+              <input
+                type="checkbox"
+                :checked="selectedTask.isOneOffTask"
+                @change="patch(selectedTask, { isOneOffTask: ($event.target as HTMLInputElement).checked })"
+              >
+              Delete after completion
+            </label>
+          </div>
           <div class="detail-actions">
             <button class="secondary-button" type="button" @click="toggleComplete(selectedTask)">
               <Check :size="16" />
               {{ selectedTask.isCompleted ? 'Mark pending' : 'Complete' }}
             </button>
-            <button class="secondary-button" type="button" @click="tasks.archiveTask(selectedTask)">
+            <button class="secondary-button" type="button" @click="archiveTask(selectedTask)">
               <Archive :size="16" />
               {{ selectedTask.isArchived ? 'Unarchive' : 'Archive' }}
             </button>

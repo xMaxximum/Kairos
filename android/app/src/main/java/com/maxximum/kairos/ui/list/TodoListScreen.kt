@@ -14,7 +14,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import com.maxximum.kairos.app.AuthUiState
@@ -32,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,11 +39,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.consumePositionChange
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -80,21 +77,17 @@ fun TodoListScreen(
     onSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val density = LocalDensity.current
     val todos by viewModel.allTodos.collectAsState(initial = emptyList())
     val syncState by viewModel.syncState.collectAsState()
     var selectedTodos by remember { mutableStateOf(setOf<Int>()) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var currentFilter by remember { mutableStateOf(TodoFilter.ALL) }
     var wasSyncing by remember { mutableStateOf(false) }
-    var pullDistancePx by remember { mutableFloatStateOf(0f) }
-    val pullThresholdPx = with(density) { 72.dp.toPx() }
     val listState = rememberLazyListState()
-    val pullProgress = (pullDistancePx / pullThresholdPx).coerceIn(0f, 1f)
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val requestSync = {
+    val requestSync: () -> Unit = {
         if (authState.isAuthenticated && !authState.isLoading && !syncState.isSyncing) {
             viewModel.syncNow()
         } else if (!authState.isAuthenticated) {
@@ -210,48 +203,22 @@ fun TodoListScreen(
             )
         }
     ) { innerPadding ->
-        Box(
+        PullToRefreshBox(
+            isRefreshing = syncState.isSyncing,
+            onRefresh = requestSync,
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize()
-                .pointerInput(authState.isAuthenticated, authState.isLoading, syncState.isSyncing) {
-                    detectVerticalDragGestures(
-                        onVerticalDrag = { change, dragAmount ->
-                            val isAtTop = listState.firstVisibleItemIndex == 0 &&
-                                listState.firstVisibleItemScrollOffset == 0
-                            if (dragAmount > 0f && isAtTop && !syncState.isSyncing) {
-                                pullDistancePx += dragAmount
-                                change.consumePositionChange()
-                            } else if (pullDistancePx > 0f && dragAmount < 0f) {
-                                pullDistancePx = (pullDistancePx + dragAmount).coerceAtLeast(0f)
-                                change.consumePositionChange()
-                            }
-                        },
-                        onDragEnd = {
-                            if (pullDistancePx >= pullThresholdPx) {
-                                requestSync()
-                            }
-                            pullDistancePx = 0f
-                        },
-                        onDragCancel = {
-                            pullDistancePx = 0f
-                        }
-                    )
-                }
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
-                if (syncState.isSyncing || pullDistancePx > 0f) {
+                if (syncState.isSyncing) {
                     item(key = "sync_status") {
                         SyncPullStatus(
-                            text = when {
-                                syncState.isSyncing -> "Syncing tasks..."
-                                pullProgress >= 1f -> "Release to sync"
-                                else -> "Pull to sync"
-                            },
+                            text = "Syncing tasks...",
                             showProgress = syncState.isSyncing,
                             modifier = Modifier
                                 .fillMaxWidth()

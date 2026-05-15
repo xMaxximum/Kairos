@@ -103,5 +103,8 @@ app.UseHttpsRedirection();
 app.UseCors("ClientApps");
 app.UseAuthentication();
 app.UseAuthorization();
+var health = () => Results.Ok(new { status = "ok" });
+app.MapGet("/healthz", health);
+app.MapGet("/api/healthz", health);
 app.MapControllers();
 app.Run();

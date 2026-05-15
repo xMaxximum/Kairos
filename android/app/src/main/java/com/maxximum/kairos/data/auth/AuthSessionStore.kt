@@ -3,6 +3,8 @@ package com.maxximum.kairos.data.auth
 import android.content.Context
 import com.maxximum.kairos.data.remote.AuthTokens
 import com.maxximum.kairos.data.remote.AuthUser
+import java.time.Instant
+import java.time.OffsetDateTime
 
 class AuthSessionStore(context: Context) {
     private val prefs = context.getSharedPreferences("kairos_auth", Context.MODE_PRIVATE)
@@ -15,7 +17,7 @@ class AuthSessionStore(context: Context) {
             .putString(KEY_REFRESH_EXPIRES_AT, tokens.refreshTokenExpiresAt)
             .putString(KEY_USER_ID, tokens.user.id)
             .putString(KEY_USER_EMAIL, tokens.user.email)
-            .apply()
+            .commit()
     }
 
     fun user(): AuthUser? {
@@ -30,8 +32,19 @@ class AuthSessionStore(context: Context) {
 
     fun refreshToken(): String? = prefs.getString(KEY_REFRESH_TOKEN, null)
 
+    fun validAccessToken(minValidityMillis: Long = 60_000L): String? {
+        val token = accessToken()?.takeIf { it.isNotBlank() } ?: return null
+        val expiresAt = prefs.getString(KEY_ACCESS_EXPIRES_AT, null)?.toEpochMillisOrNull() ?: return null
+        return token.takeIf { expiresAt - System.currentTimeMillis() > minValidityMillis }
+    }
+
+    fun isRefreshTokenExpired(): Boolean {
+        val expiresAt = prefs.getString(KEY_REFRESH_EXPIRES_AT, null)?.toEpochMillisOrNull() ?: return false
+        return expiresAt <= System.currentTimeMillis()
+    }
+
     fun clear() {
-        prefs.edit().clear().apply()
+        prefs.edit().clear().commit()
     }
 
     private companion object {
@@ -42,4 +55,10 @@ class AuthSessionStore(context: Context) {
         const val KEY_USER_ID = "user_id"
         const val KEY_USER_EMAIL = "user_email"
     }
+}
+
+private fun String.toEpochMillisOrNull(): Long? {
+    return runCatching { Instant.parse(this).toEpochMilli() }
+        .recoverCatching { OffsetDateTime.parse(this).toInstant().toEpochMilli() }
+        .getOrNull()
 }

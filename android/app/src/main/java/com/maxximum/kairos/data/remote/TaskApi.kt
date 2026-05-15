@@ -10,6 +10,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.time.Instant
 import java.time.OffsetDateTime
 
@@ -30,14 +31,18 @@ data class RemoteTask(
     val isArchived: Boolean,
     val isOneOffTask: Boolean
 ) {
+    val updatedAtMillis: Long?
+        get() = parseInstantMillis(updatedAt)
+
     fun toTodo(): Todo {
         return Todo(
             clientId = clientId,
             serverId = id,
+            remoteUpdatedAt = updatedAtMillis,
             title = title,
             description = description,
             timestamp = parseInstantMillis(createdAt) ?: System.currentTimeMillis(),
-            updatedAt = parseInstantMillis(updatedAt) ?: System.currentTimeMillis(),
+            updatedAt = updatedAtMillis ?: System.currentTimeMillis(),
             deletedAt = deletedAt?.let(::parseInstantMillis),
             lastSyncedAt = System.currentTimeMillis(),
             syncStatus = SyncStatus.SYNCED.name,
@@ -83,12 +88,34 @@ class TaskApi(
         JSONObject(readTextResponse(connection)).toRemoteTask()
     }
 
-    suspend fun deleteTaskByClientId(accessToken: String, clientId: String) = withContext(Dispatchers.IO) {
-        val connection = openConnection("api/tasks/client/$clientId").apply {
+    suspend fun restoreTaskByClientId(accessToken: String, todo: Todo): RemoteTask = withContext(Dispatchers.IO) {
+        val connection = openConnection("api/tasks/client/${todo.clientId}/restore").apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $accessToken")
+            setRequestProperty("Content-Type", "application/json")
+        }
+        connection.outputStream.use { output ->
+            output.write(todo.toRestoreJson().toString().toByteArray(Charsets.UTF_8))
+        }
+        JSONObject(readTextResponse(connection)).toRemoteTask()
+    }
+
+    suspend fun deleteTaskByClientId(accessToken: String, todo: Todo): RemoteTask? = withContext(Dispatchers.IO) {
+        val path = buildString {
+            append("api/tasks/client/")
+            append(todo.clientId)
+            todo.remoteUpdatedAt?.let {
+                append("?baseUpdatedAt=")
+                append(urlEncode(Instant.ofEpochMilli(it).toString()))
+            }
+        }
+        val connection = openConnection(path).apply {
             requestMethod = "DELETE"
             setRequestProperty("Authorization", "Bearer $accessToken")
         }
-        readTextResponse(connection, allowEmpty = true, treatNotFoundAsSuccess = true)
+        val response = readTextResponse(connection, allowEmpty = true, treatNotFoundAsSuccess = true)
+        response.takeIf { it.isNotBlank() }?.let { JSONObject(it).toRemoteTask() }
     }
 
     private fun openConnection(path: String): HttpURLConnection {
@@ -115,7 +142,8 @@ class TaskApi(
         }.orEmpty()
 
         if (status !in 200..299) {
-            throw TaskApiException(text.takeIf { it.isNotBlank() } ?: "HTTP $status")
+            val error = readableError(text, status)
+            throw TaskApiException(error.message, status, error.code)
         }
         if (!allowEmpty && text.isBlank()) {
             throw TaskApiException("Empty response")
@@ -124,11 +152,16 @@ class TaskApi(
     }
 }
 
-class TaskApiException(message: String) : Exception(message)
+class TaskApiException(
+    message: String,
+    val statusCode: Int = 0,
+    val code: String? = null
+) : Exception(message)
 
 private fun Todo.toCreateJson(): JSONObject {
     return JSONObject()
         .put("clientId", clientId)
+        .putBaseUpdatedAt(remoteUpdatedAt)
         .put("title", title)
         .put("description", description)
         .put("reminderTime", reminderTime?.let { Instant.ofEpochMilli(it).toString() })
@@ -139,6 +172,29 @@ private fun Todo.toCreateJson(): JSONObject {
         .put("isCompleted", isCompleted)
         .put("isArchived", isArchived)
         .put("isOneOffTask", isOneOffTask)
+}
+
+private fun Todo.toRestoreJson(): JSONObject {
+    return JSONObject()
+        .putBaseUpdatedAt(remoteUpdatedAt)
+        .put("title", title)
+        .put("description", description)
+        .put("reminderTime", reminderTime?.let { Instant.ofEpochMilli(it).toString() })
+        .put("recurrence", recurrence)
+        .put("isHighPriority", isHighPriority)
+        .put("isFullScreenReminder", isFullScreenReminder)
+        .put("attachments", JSONArray(attachments))
+        .put("isCompleted", isCompleted)
+        .put("isArchived", isArchived)
+        .put("isOneOffTask", isOneOffTask)
+}
+
+private fun JSONObject.putBaseUpdatedAt(remoteUpdatedAt: Long?): JSONObject {
+    return if (remoteUpdatedAt == null) {
+        this
+    } else {
+        put("baseUpdatedAt", Instant.ofEpochMilli(remoteUpdatedAt).toString())
+    }
 }
 
 private fun JSONObject.toRemoteTask(): RemoteTask {
@@ -159,6 +215,25 @@ private fun JSONObject.toRemoteTask(): RemoteTask {
         isArchived = optBoolean("isArchived"),
         isOneOffTask = optBoolean("isOneOffTask")
     )
+}
+
+private data class ErrorResponse(val message: String, val code: String?)
+
+private fun readableError(text: String, status: Int): ErrorResponse {
+    if (text.isBlank()) return ErrorResponse("HTTP $status", null)
+    return runCatching {
+        val json = JSONObject(text)
+        ErrorResponse(
+            message = json.optString("error").takeIf { it.isNotBlank() } ?: text,
+            code = json.optNullableString("code")
+        )
+    }.getOrElse {
+        ErrorResponse(text, null)
+    }
+}
+
+private fun urlEncode(value: String): String {
+    return URLEncoder.encode(value, Charsets.UTF_8.name())
 }
 
 private fun JSONObject.optNullableString(name: String): String? {

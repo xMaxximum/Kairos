@@ -27,6 +27,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -111,6 +112,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -126,9 +128,35 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(103, 214, 163, 0.13);
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.7fr);
+  gap: 10px;
+}
+
+.toggle-list {
+  display: grid;
+  gap: 8px;
+}
+
+.check-row {
+  min-height: 28px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+}
+
+.check-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
 }
 
 .segmented,
@@ -181,6 +209,18 @@ textarea:focus {
   color: var(--muted);
   padding: 2px 7px;
   font-size: 0.78rem;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.tag.priority {
+  background: rgba(245, 201, 107, 0.14);
+  color: var(--warning);
 }
 
 .icon-button {
@@ -288,6 +328,26 @@ button:disabled {
   color: var(--muted);
 }
 
+.meta-line {
+  display: flex;
+  gap: 8px;
+  min-height: 17px;
+  margin-top: 4px;
+  color: var(--primary);
+  font-size: 0.78rem;
+}
+
+.meta-line:empty {
+  display: none;
+}
+
+.row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
 .empty-state {
   min-height: 280px;
   border: 1px dashed var(--line);
@@ -348,6 +408,10 @@ button:disabled {
   }
 
   .task-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .field-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -85,6 +85,13 @@ fun TodoNavHost(
     var showSettingsScreen by remember { mutableStateOf(false) }
     val syncState by viewModel.syncState.collectAsState()
 
+    val pagerState = rememberPagerState(
+        initialPage = if (initialTodoId > 0) 2 else 0,
+        pageCount = {
+            if (selectedTodoId > 0 && allowDetailFromClick) 3 else 2
+        }
+    )
+
     if (showSettingsScreen) {
         SettingsScreen(
             onBack = { showSettingsScreen = false },
@@ -103,13 +110,6 @@ fun TodoNavHost(
         )
         return
     }
-
-    val pagerState = rememberPagerState(
-        initialPage = if (initialTodoId > 0) 2 else 0,
-        pageCount = {
-            if (selectedTodoId > 0 && allowDetailFromClick) 3 else 2
-        }
-    )
 
     LaunchedEffect(initialTodoId) {
         if (initialTodoId > 0) {

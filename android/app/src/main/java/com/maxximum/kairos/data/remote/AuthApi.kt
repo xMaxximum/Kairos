@@ -107,12 +107,23 @@ class AuthApi(
         }.orEmpty()
 
         if (status !in 200..299) {
-            val message = text.takeIf { it.isNotBlank() } ?: "HTTP $status"
-            throw AuthApiException(message)
+            throw AuthApiException(readableError(text, status), status)
         }
 
         return JSONObject(text)
     }
 }
 
-class AuthApiException(message: String) : Exception(message)
+class AuthApiException(message: String, val statusCode: Int) : Exception(message)
+
+private fun readableError(text: String, status: Int): String {
+    if (text.isBlank()) return "HTTP $status"
+    return runCatching {
+        val json = JSONObject(text)
+        when {
+            json.has("error") -> json.getString("error")
+            json.has("errors") -> json.getJSONArray("errors").join(", ")
+            else -> text
+        }
+    }.getOrElse { text }
+}

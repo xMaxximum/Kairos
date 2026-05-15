@@ -21,6 +21,7 @@ data class Todo(
     @ColumnInfo(defaultValue = "''")
     val clientId: String = UUID.randomUUID().toString(),
     val serverId: String? = null,
+    val remoteUpdatedAt: Long? = null,
     val title: String,
     val description: String = "",
     val timestamp: Long = System.currentTimeMillis(),

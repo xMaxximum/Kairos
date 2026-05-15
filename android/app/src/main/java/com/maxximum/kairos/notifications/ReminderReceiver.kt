@@ -13,6 +13,7 @@ import com.maxximum.kairos.app.MainActivity
 import com.maxximum.kairos.app.PostponeActivity
 import com.maxximum.kairos.data.local.AppDatabase
 import com.maxximum.kairos.data.local.LocalTodoRepository
+import com.maxximum.kairos.data.sync.TodoSyncWorker
 import com.maxximum.kairos.domain.logic.applyTodoCompletion
 import com.maxximum.kairos.platform.ToastUtils
 import com.maxximum.kairos.platform.canUseFullScreenIntentPermission
@@ -68,6 +69,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     updateTodo = { updated -> repository.updateTodo(updated) },
                     deleteTodo = { updated -> repository.deleteTodo(updated) }
                 )
+                TodoSyncWorker.enqueueNow(context)
             }
         }
     }

@@ -5,6 +5,16 @@ const CACHE_KEY = 'kairos.tasks.cache'
 
 type TaskFilter = 'active' | 'pending' | 'done' | 'archived'
 
+interface CreateTaskInput {
+  title: string
+  description?: string
+  reminderTime?: string | null
+  recurrence?: string
+  isHighPriority?: boolean
+  isFullScreenReminder?: boolean
+  isOneOffTask?: boolean
+}
+
 export const useTasksStore = defineStore('tasks', () => {
   const auth = useAuthStore()
   const tasks = ref<TaskItem[]>([])
@@ -82,8 +92,8 @@ export const useTasksStore = defineStore('tasks', () => {
     }
   }
 
-  async function createTask(title: string, description = '') {
-    const trimmed = title.trim()
+  async function createTask(input: CreateTaskInput) {
+    const trimmed = input.title.trim()
     if (!trimmed) return
     isSaving.value = true
     try {
@@ -92,15 +102,15 @@ export const useTasksStore = defineStore('tasks', () => {
         body: {
           clientId: crypto.randomUUID(),
           title: trimmed,
-          description,
-          reminderTime: null,
-          recurrence: 'NONE',
-          isHighPriority: false,
-          isFullScreenReminder: false,
+          description: input.description || '',
+          reminderTime: input.reminderTime || null,
+          recurrence: input.recurrence || 'NONE',
+          isHighPriority: input.isHighPriority || false,
+          isFullScreenReminder: input.isFullScreenReminder || false,
           attachments: [],
           isCompleted: false,
           isArchived: false,
-          isOneOffTask: false
+          isOneOffTask: input.isOneOffTask || false
         } satisfies CreateTaskRequest
       })
       upsertLocal(task)
@@ -113,7 +123,10 @@ export const useTasksStore = defineStore('tasks', () => {
   async function patchTask(task: TaskItem, patch: Partial<TaskItem>) {
     const updated = await auth.authFetch<TaskItem>(`/tasks/${task.id}`, {
       method: 'PATCH',
-      body: patch
+      body: {
+        ...patch,
+        baseUpdatedAt: task.updatedAt
+      }
     })
     upsertLocal(updated)
   }
@@ -127,7 +140,7 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   async function deleteTask(task: TaskItem) {
-    await auth.authFetch(`/tasks/${task.id}`, { method: 'DELETE' })
+    await auth.authFetch(`/tasks/${task.id}?baseUpdatedAt=${encodeURIComponent(task.updatedAt)}`, { method: 'DELETE' })
     tasks.value = tasks.value.filter((item) => item.id !== task.id)
     persist()
   }

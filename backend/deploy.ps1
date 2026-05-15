@@ -55,7 +55,7 @@ try {
     Invoke-Native scp $localArchive "${ServerAlias}:$remoteArchive"
 
     Write-Host "Rebuilding and restarting services..."
-    $deployCommand = "set -e; mkdir -p '$remotePathEscaped'; cd '$remotePathEscaped'; tar -xzf '$remoteArchiveEscaped'; rm -f '$remoteArchiveEscaped'; find backend web -type d -exec chmod 755 {} +; find backend web -type f -exec chmod 644 {} +; [ ! -f backend/.env ] || chmod 600 backend/.env; cd backend; docker compose -f '$composeFileEscaped' up -d --build --remove-orphans; docker compose -f '$composeFileEscaped' restart caddy; docker compose -f '$composeFileEscaped' ps"
+    $deployCommand = "set -e; mkdir -p '$remotePathEscaped'; cd '$remotePathEscaped'; tar -xzf '$remoteArchiveEscaped'; rm -f '$remoteArchiveEscaped'; find backend web -type d -exec chmod 755 {} +; find backend web -type f -exec chmod 644 {} +; [ ! -f backend/.env ] || chmod 600 backend/.env; cd backend; if [ -n `"`$(docker compose -f '$composeFileEscaped' ps -q postgres 2>/dev/null)`" ]; then mkdir -p ../backups; docker compose -f '$composeFileEscaped' exec -T postgres sh -c 'pg_dump -U `"`$POSTGRES_USER`" -d `"`$POSTGRES_DB`"' | gzip > ../backups/kairos-`$(date -u +%Y%m%dT%H%M%SZ).sql.gz; fi; docker compose -f '$composeFileEscaped' up -d --build --remove-orphans; docker compose -f '$composeFileEscaped' restart caddy; docker compose -f '$composeFileEscaped' ps"
     Invoke-Native ssh $ServerAlias $deployCommand
 
     if ($Logs) {

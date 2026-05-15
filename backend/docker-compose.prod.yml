@@ -24,12 +24,18 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-Kairos}
       Jwt__Audience: ${JWT_AUDIENCE:-KairosClients}
       Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in backend/.env}
-      Jwt__AccessTokenMinutes: 15
-      Jwt__RefreshTokenDays: 60
+      Jwt__AccessTokenMinutes: 60
+      Jwt__RefreshTokenDays: 180
       Database__ApplyMigrationsOnStartup: true
       Cors__AllowedOrigins__0: ${CORS_ORIGIN_0:-https://todo.tweetwhale.com}
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +48,12 @@ services:
       NUXT_PUBLIC_API_BASE: /api
     expose:
       - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   caddy:
     image: caddy:2-alpine
@@ -54,8 +66,10 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      - api
-      - web
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
 
 volumes:
   kairos-postgres:

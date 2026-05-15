@@ -12,10 +12,10 @@ interface TodoDao {
     @Query("SELECT * FROM todos WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     suspend fun getAllTodosSnapshot(): List<Todo>
 
-    @Query("SELECT * FROM todos WHERE syncStatus != 'SYNCED' OR serverId IS NULL")
+    @Query("SELECT * FROM todos WHERE syncStatus != 'SYNCED'")
     suspend fun getPendingSyncTodos(): List<Todo>
 
-    @Query("SELECT COUNT(*) FROM todos WHERE syncStatus != 'SYNCED' OR serverId IS NULL")
+    @Query("SELECT COUNT(*) FROM todos WHERE syncStatus != 'SYNCED'")
     suspend fun getPendingSyncCount(): Int
 
     @Query("SELECT * FROM todos WHERE id = :id AND deletedAt IS NULL")

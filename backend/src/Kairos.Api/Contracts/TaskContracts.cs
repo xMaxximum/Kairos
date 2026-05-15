@@ -28,7 +28,8 @@ public sealed record CreateTaskRequest(
     IReadOnlyList<string>? Attachments,
     bool IsCompleted,
     bool IsArchived,
-    bool IsOneOffTask);
+    bool IsOneOffTask,
+    DateTimeOffset? BaseUpdatedAt = null);
 
 public sealed record UpdateTaskRequest(
     string? Title,
@@ -40,4 +41,23 @@ public sealed record UpdateTaskRequest(
     IReadOnlyList<string>? Attachments,
     bool? IsCompleted,
     bool? IsArchived,
-    bool? IsOneOffTask);
+    bool? IsOneOffTask,
+    DateTimeOffset? BaseUpdatedAt = null);
+
+public sealed record RestoreTaskRequest(
+    string Title,
+    string? Description,
+    DateTimeOffset? ReminderTime,
+    string? Recurrence,
+    bool IsHighPriority,
+    bool IsFullScreenReminder,
+    IReadOnlyList<string>? Attachments,
+    bool IsCompleted,
+    bool IsArchived,
+    bool IsOneOffTask,
+    DateTimeOffset? BaseUpdatedAt);
+
+public sealed record TaskConflictResponse(
+    string Code,
+    string Error,
+    TaskResponse ServerTask);
