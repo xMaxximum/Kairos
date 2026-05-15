@@ -85,8 +85,12 @@ fun TodoListScreen(
     var currentFilter by remember { mutableStateOf(TodoFilter.ALL) }
     var isSearchOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var filterMenuExpanded by remember { mutableStateOf(false) }
     var wasSyncing by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -124,6 +128,20 @@ fun TodoListScreen(
         wasSyncing = syncState.isSyncing
     }
 
+    LaunchedEffect(isSearchOpen) {
+        if (isSearchOpen) {
+            delay(100)
+            searchFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
+
+    BackHandler(enabled = isSearchOpen) {
+        isSearchOpen = false
+        searchQuery = ""
+        keyboardController?.hide()
+    }
+
     val filteredTodos = remember(todos, currentFilter, searchQuery) {
         val normalizedQuery = searchQuery.trim().lowercase(Locale.getDefault())
         todos.filter { 
@@ -150,97 +168,121 @@ fun TodoListScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { 
+        bottomBar = {
+            Surface(
+                tonalElevation = 8.dp,
+                shadowElevation = 8.dp,
+                modifier = Modifier.imePadding()
+            ) {
+                Column {
                     if (isSearchOpen && !isSelectionMode) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .focusRequester(searchFocusRequester),
                             singleLine = true,
                             placeholder = { Text("Search tasks") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    isSearchOpen = false
+                                    searchQuery = ""
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close search")
+                                }
+                            }
                         )
-                    } else {
-                        Column {
+                    }
+
+                    BottomAppBar(modifier = Modifier.navigationBarsPadding()) {
+                        IconButton(onClick = {
+                            if (isSelectionMode) {
+                                isSelectionMode = false
+                                selectedTodos = emptySet()
+                            } else {
+                                onBack()
+                            }
+                        }) {
+                            val icon = if (isSelectionMode) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack
+                            Icon(icon, contentDescription = "Back")
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            if (isSelectionMode) {
+                                Text("${selectedTodos.size} selected", style = MaterialTheme.typography.titleMedium)
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Your Tasks", style = MaterialTheme.typography.titleMedium)
+                                    if (overdueCount > 0) {
+                                        Badge(containerColor = Color(0xFFD32F2F)) {
+                                            Text("$overdueCount", color = Color.White)
+                                        }
+                                    }
+                                }
+                                val subtitle = if (searchQuery.isBlank()) currentFilter.label else "${currentFilter.label} / search"
+                                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+
                         if (isSelectionMode) {
-                            Text("${selectedTodos.size} selected")
+                            IconButton(onClick = {
+                                val toArchive = todos.filter { it.id in selectedTodos }
+                                viewModel.archiveMultiple(toArchive)
+                                isSelectionMode = false
+                                selectedTodos = emptySet()
+                            }) { Icon(Icons.Default.Archive, contentDescription = "Archive") }
+
+                            IconButton(onClick = {
+                                val toDelete = todos.filter { it.id in selectedTodos }
+                                viewModel.deleteMultiple(toDelete)
+                                isSelectionMode = false
+                                selectedTodos = emptySet()
+                            }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                         } else {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Your Tasks")
-                                if (overdueCount > 0) {
-                                    Badge(containerColor = Color(0xFFD32F2F)) {
-                                        Text("$overdueCount", color = Color.White)
+                            IconButton(onClick = onSettings) {
+                                Icon(Icons.Default.Settings, contentDescription = "Settings")
+                            }
+                            Box {
+                                IconButton(onClick = { filterMenuExpanded = true }) {
+                                    Icon(Icons.Default.FilterList, contentDescription = "Filter")
+                                }
+                                DropdownMenu(
+                                    expanded = filterMenuExpanded,
+                                    onDismissRequest = { filterMenuExpanded = false }
+                                ) {
+                                    TodoFilter.values().forEach { filter ->
+                                        DropdownMenuItem(
+                                            text = { Text(filter.label) },
+                                            onClick = {
+                                                currentFilter = filter
+                                                filterMenuExpanded = false
+                                            },
+                                            leadingIcon = {
+                                                if (currentFilter == filter) Icon(Icons.Default.Check, contentDescription = null)
+                                            }
+                                        )
                                     }
                                 }
                             }
-                            val subtitle = if (searchQuery.isBlank()) currentFilter.label else "${currentFilter.label} / search"
-                            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        }
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        if (isSearchOpen) {
-                            isSearchOpen = false
-                            searchQuery = ""
-                        } else if (isSelectionMode) {
-                            isSelectionMode = false
-                            selectedTodos = emptySet()
-                        } else {
-                            onBack()
-                        }
-                    }) {
-                        val icon = if (isSearchOpen) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack
-                        Icon(icon, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (isSelectionMode) {
-                        IconButton(onClick = {
-                            val toArchive = todos.filter { it.id in selectedTodos }
-                            viewModel.archiveMultiple(toArchive)
-                            isSelectionMode = false; selectedTodos = emptySet()
-                        }) { Icon(Icons.Default.Archive, contentDescription = "Archive") }
-                        
-                        IconButton(onClick = {
-                            val toDelete = todos.filter { it.id in selectedTodos }
-                            viewModel.deleteMultiple(toDelete)
-                            isSelectionMode = false; selectedTodos = emptySet()
-                        }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
-                    } else {
-                        if (isSearchOpen) {
-                            if (searchQuery.isNotBlank()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
-                                }
-                            }
-                        } else {
-                            IconButton(onClick = { isSearchOpen = true }) {
-                                Icon(Icons.Default.Search, contentDescription = "Search")
-                            }
-                        }
-                        IconButton(onClick = onSettings) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
-                        }
-                        var expanded by remember { mutableStateOf(false) }
-                        IconButton(onClick = { expanded = true }) { Icon(Icons.Default.FilterList, null) }
-                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            TodoFilter.values().forEach { filter ->
-                                DropdownMenuItem(
-                                    text = { Text(filter.label) },
-                                    onClick = { currentFilter = filter; expanded = false },
-                                    leadingIcon = {
-                                        if (currentFilter == filter) Icon(Icons.Default.Check, null)
-                                    }
-                                )
+                            FilledTonalButton(
+                                onClick = {
+                                    isSearchOpen = true
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Search")
                             }
                         }
                     }
                 }
-            )
+            }
         }
     ) { innerPadding ->
         PullToRefreshBox(
@@ -251,7 +293,15 @@ fun TodoListScreen(
                 .fillMaxSize()
         ) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                    },
                 state = listState,
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {

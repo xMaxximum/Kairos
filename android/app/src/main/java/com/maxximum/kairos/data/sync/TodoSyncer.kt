@@ -25,10 +25,12 @@ data class TodoSyncSummary(
     val imported: Int,
     val updated: Int,
     val pendingAfterSync: Int,
-    val skipped: Boolean = false
+    val skipped: Boolean = false,
+    val recoverableConflicts: Int = 0
 ) {
     fun statusMessage(): String {
         if (skipped) return "Sign in before syncing."
+        if (recoverableConflicts > 0) return "Some tasks changed elsewhere. Sync again to retry."
         return "Uploaded $uploaded, deleted $deleted. Server returned $remoteReturned; imported $imported, updated $updated. Pending $pendingAfterSync."
     }
 }
@@ -57,22 +59,44 @@ class TodoSyncer(
             skipped = true
         )
 
+        hydrateMissingRemoteMetadata(accessToken)
+
         val pendingTodos = repository.getPendingSyncTodos()
         var uploaded = 0
         var deleted = 0
+        var recoverableConflicts = 0
 
         pendingTodos.forEach { todo ->
             if (todo.deletedAt != null) {
-                var remote: RemoteTask? = null
-                if (todo.serverId != null) {
-                    remote = taskApi.deleteTaskByClientId(accessToken, todo)
+                val remote = try {
+                    if (todo.serverId != null) {
+                        taskApi.deleteTaskByClientId(accessToken, todo)
+                    } else {
+                        null
+                    }
+                } catch (error: TaskApiException) {
+                    if (error.isRecoverableTaskConflict()) {
+                        recoverTaskConflict(accessToken, todo, error)
+                        recoverableConflicts += 1
+                        return@forEach
+                    }
+                    throw error
                 }
                 if (todo.isStillCurrentPending()) {
                     repository.updateSyncedTodo(remote?.toSyncedLocalTodo(todo) ?: todo)
                     deleted += 1
                 }
             } else {
-                val remote = uploadTask(accessToken, todo)
+                val remote = try {
+                    uploadTask(accessToken, todo)
+                } catch (error: TaskApiException) {
+                    if (error.isRecoverableTaskConflict()) {
+                        recoverTaskConflict(accessToken, todo, error)
+                        recoverableConflicts += 1
+                        return@forEach
+                    }
+                    throw error
+                }
                 if (todo.isStillCurrentPending()) {
                     repository.updateSyncedTodo(remote.toSyncedLocalTodo(todo))
                     uploaded += 1
@@ -111,7 +135,8 @@ class TodoSyncer(
             remoteReturned = remoteTasks.size,
             imported = imported,
             updated = updated,
-            pendingAfterSync = repository.getPendingSyncCount()
+            pendingAfterSync = repository.getPendingSyncCount(),
+            recoverableConflicts = recoverableConflicts
         )
     }
 
@@ -125,6 +150,45 @@ class TodoSyncer(
                 throw error
             }
         }
+    }
+
+    private suspend fun hydrateMissingRemoteMetadata(accessToken: String) {
+        val pendingWithMissingBase = repository.getPendingSyncTodos()
+            .filter { it.serverId != null && it.remoteUpdatedAt == null }
+        if (pendingWithMissingBase.isEmpty()) return
+
+        val remoteByClientId = taskApi.getTasks(accessToken).associateBy { it.clientId }
+        pendingWithMissingBase.forEach { local ->
+            val remote = remoteByClientId[local.clientId] ?: return@forEach
+            val current = repository.getTodoByClientId(local.clientId) ?: return@forEach
+            if (current.syncStatus != SyncStatus.SYNCED.name && current.remoteUpdatedAt == null) {
+                repository.updateTodo(current.withRemoteMetadata(remote))
+            }
+        }
+    }
+
+    private suspend fun recoverTaskConflict(accessToken: String, local: Todo, error: TaskApiException) {
+        val serverTask = error.serverTask ?: taskApi.getTasks(accessToken).firstOrNull { it.clientId == local.clientId }
+        if (serverTask != null) {
+            val current = repository.getTodoByClientId(local.clientId) ?: return
+            if (current.syncStatus != SyncStatus.SYNCED.name) {
+                // TODO: Add a conflict inbox that stores both copies and lets the user compare local vs server.
+                repository.updateTodo(current.withRemoteMetadata(serverTask))
+            }
+        }
+    }
+
+    private fun TaskApiException.isRecoverableTaskConflict(): Boolean {
+        return statusCode == 409 && code == "task_conflict"
+    }
+
+    private fun Todo.withRemoteMetadata(remote: RemoteTask): Todo {
+        return copy(
+            serverId = remote.id,
+            remoteUpdatedAt = remote.updatedAtMillis,
+            lastSyncedAt = System.currentTimeMillis(),
+            syncStatus = SyncStatus.DIRTY.name
+        )
     }
 
     private fun RemoteTask.toSyncedLocalTodo(local: Todo): Todo {

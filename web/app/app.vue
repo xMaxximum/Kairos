@@ -32,7 +32,7 @@ const settingsOpen = ref(false)
 const toast = ref('')
 
 const selectedTask = computed(() => {
-  return tasks.visibleTasks.find((task) => task.id === selectedTaskId.value) || tasks.visibleTasks[0] || null
+  return tasks.visibleTasks.find((task) => task.id === selectedTaskId.value) || null
 })
 
 const lastSyncText = computed(() => {
@@ -46,11 +46,16 @@ const lastSyncText = computed(() => {
 })
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown)
   auth.hydrate()
   tasks.hydrate()
   if (auth.isAuthenticated) {
     await safeRefresh()
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 watch(
@@ -148,6 +153,12 @@ function logout() {
   settingsOpen.value = false
   selectedTaskId.value = null
   showToast('Signed out.')
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    selectedTaskId.value = null
+  }
 }
 
 function showToast(message: string) {

@@ -36,7 +36,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -142,24 +141,51 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
 
     todo?.let { currentTodo ->
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Details") },
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-                    actions = {
-                        IconButton(onClick = {
-                            val updated = currentTodo.copy(isArchived = !currentTodo.isArchived)
-                            viewModel.update(updated)
-                            ToastUtils.show(context, if (updated.isArchived) "Archived" else "Unarchived")
-                        }) { Icon(if (currentTodo.isArchived) Icons.Default.Unarchive else Icons.Default.Archive, null) }
-                        
+            bottomBar = {
+                Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
+                    BottomAppBar(modifier = Modifier.navigationBarsPadding()) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                        Text(
+                            "Details",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f)
+                        )
                         IconButton(onClick = { showDeleteConfirm = true }) {
-                            Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Delete",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = { showTimePickerDialog = true }) {
+                            Icon(Icons.Default.NotificationsActive, contentDescription = "Set reminder")
+                        }
+                        IconButton(onClick = {
+                            viewModel.toggleComplete(currentTodo, !currentTodo.isCompleted) { result ->
+                                ToastUtils.show(context, result.message)
+                                if (result.deleted) onBack()
+                            }
+                        }) {
+                            Icon(
+                                if (currentTodo.isCompleted) Icons.Default.RadioButtonUnchecked else Icons.Default.CheckCircle,
+                                contentDescription = if (currentTodo.isCompleted) "Mark pending" else "Mark complete"
+                            )
                         }
                     }
-                )
+                }
             }
         ) { innerPadding ->
+            val now = System.currentTimeMillis()
+            val scheduledTime = currentTodo.reminderTime
+            val scheduledText = scheduledTime?.let {
+                SimpleDateFormat("EEEE, MMM dd yyyy, HH:mm", Locale.getDefault()).format(Date(it))
+            } ?: "Not scheduled"
+            val isOverdueReminder = scheduledTime != null && !currentTodo.isCompleted && scheduledTime < now
+            val addedDate = SimpleDateFormat("EEEE, MMM dd yyyy, HH:mm", Locale.getDefault()).format(Date(currentTodo.timestamp))
+            val switchColors = detailSwitchColors()
+
             Column(
                 modifier = Modifier
                     .padding(innerPadding)
@@ -172,159 +198,26 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                         focusManager.clearFocus()
                         keyboardController?.hide()
                     }
-                    .padding(24.dp)
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Checkbox(checked = currentTodo.isCompleted, onCheckedChange = { 
-                        viewModel.toggleComplete(currentTodo, it) { result ->
-                            ToastUtils.show(context, result.message)
-                            if (result.deleted) {
-                                onBack()
+                OutlinedTextField(
+                    value = titleDraft,
+                    onValueChange = { titleDraft = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp, max = 180.dp)
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures { change, _ ->
+                                change.consume()
                             }
-                        }
-                    })
-                    OutlinedTextField(
-                        value = titleDraft,
-                        onValueChange = { titleDraft = it },
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 64.dp, max = 180.dp)
-                            .pointerInput(Unit) {
-                                detectHorizontalDragGestures { change, _ ->
-                                    change.consumePositionChange()
-                                }
-                            },
-                        label = { Text("Title") },
-                        singleLine = false,
-                        minLines = 1,
-                        maxLines = 4,
-                        textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
-
-                Text("Repeat", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val recurrenceType = currentTodo.recurrenceType()
-                    FilterChip(
-                        selected = recurrenceType == RecurrenceType.NONE,
-                        onClick = {
-                            val updated = currentTodo.copy(recurrence = RecurrenceType.NONE.name)
-                            viewModel.update(updated)
                         },
-                        label = { Text("Off") }
-                    )
-                    FilterChip(
-                        selected = recurrenceType == RecurrenceType.DAILY,
-                        onClick = {
-                            showDailyTimeDialog = true
-                        },
-                        label = { Text("Daily") }
-                    )
-                    FilterChip(
-                        selected = recurrenceType == RecurrenceType.WEEKLY,
-                        onClick = {
-                            showWeeklyDialog = true
-                        },
-                        label = { Text("Weekly") }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text("Notification Options", style = MaterialTheme.typography.labelMedium)
-                
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Switch(
-                            checked = currentTodo.isHighPriority,
-                            onCheckedChange = {
-                                val updated = currentTodo.copy(isHighPriority = it)
-                                viewModel.update(updated)
-                                ToastUtils.show(context, if (it) "High priority enabled" else "Low priority")
-                            },
-                            enabled = !currentTodo.isFullScreenReminder
-                        )
-                        Text(
-                            "High Priority",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (currentTodo.isFullScreenReminder) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
-                        )
-                        if (currentTodo.isFullScreenReminder) {
-                            Text(
-                                "(auto on with full-screen)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Switch(
-                            checked = currentTodo.isFullScreenReminder,
-                            onCheckedChange = { enabled ->
-                                if (enabled && !canUseFullScreenIntentPermission(context)) {
-                                    openFullScreenIntentSettings(context)
-                                    canUseFullScreenIntent = false
-                                    ToastUtils.show(context, "Allow full-screen reminders in system settings")
-                                } else {
-                                    canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
-                                    val updated = currentTodo.copy(isFullScreenReminder = enabled)
-                                    viewModel.update(updated)
-                                    ToastUtils.show(context, if (enabled) "Full-screen reminder enabled" else "Full-screen reminder disabled")
-                                }
-                            }
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Full-screen reminder", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                if (canUseFullScreenIntent) "Shows over lock screen when reminder triggers."
-                                else "Permission needed on this Android version.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    if (!canUseFullScreenIntent) {
-                        TextButton(onClick = {
-                            openFullScreenIntentSettings(context)
-                            canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
-                        }) {
-                            Text("Open Full-Screen Permission")
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Switch(
-                            checked = currentTodo.isOneOffTask,
-                            onCheckedChange = {
-                                val updated = currentTodo.copy(isOneOffTask = it)
-                                viewModel.update(updated)
-                                ToastUtils.show(context, if (it) "Auto-delete enabled" else "Auto-delete disabled")
-                            }
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Auto-delete when done", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Automatically delete this task when marked as completed (non-recurring tasks only).",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+                    label = { Text("Title") },
+                    singleLine = false,
+                    minLines = 1,
+                    maxLines = 4,
+                    textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+                )
 
                 OutlinedTextField(
                     value = descriptionDraft,
@@ -334,47 +227,40 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                     minLines = 3
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-                val addedDate = SimpleDateFormat("EEEE, MMM dd yyyy, HH:mm", Locale.getDefault()).format(Date(currentTodo.timestamp))
-                Text("Added on $addedDate", style = MaterialTheme.typography.bodySmall)
-                
-                Spacer(modifier = Modifier.height(24.dp)); HorizontalDivider(); Spacer(modifier = Modifier.height(24.dp))
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Attachments", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.weight(1f))
-                    IconButton(onClick = { launcher.launch("*/*") }) {
-                        Icon(Icons.Default.AddCircleOutline, null)
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                if (currentTodo.attachments.isNotEmpty()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(currentTodo.attachments) { uriStr ->
-                            AttachmentItem(uriStr = uriStr, onRemove = {
-                                val updated = currentTodo.copy(attachments = currentTodo.attachments - uriStr)
-                                viewModel.update(updated)
-                                ToastUtils.show(context, "Attachment removed")
-                            })
+                DetailSectionLabel("Actions")
+                Button(
+                    onClick = {
+                        viewModel.toggleComplete(currentTodo, !currentTodo.isCompleted) { result ->
+                            ToastUtils.show(context, result.message)
+                            if (result.deleted) onBack()
                         }
-                    }
-                } else {
-                    OutlinedButton(onClick = { launcher.launch("*/*") }, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.CloudUpload, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Upload Files")
-                    }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        if (currentTodo.isCompleted) Icons.Default.RadioButtonUnchecked else Icons.Default.CheckCircle,
+                        contentDescription = null
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (currentTodo.isCompleted) "Mark pending" else "Complete task", maxLines = 1)
                 }
-                
-                Spacer(modifier = Modifier.weight(1f))
+                OutlinedButton(
+                    onClick = {
+                        val updated = currentTodo.copy(isArchived = !currentTodo.isArchived)
+                        viewModel.update(updated)
+                        ToastUtils.show(context, if (updated.isArchived) "Archived" else "Unarchived")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        if (currentTodo.isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
+                        contentDescription = null
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (currentTodo.isArchived) "Unarchive task" else "Archive task", maxLines = 1)
+                }
 
-                val now = System.currentTimeMillis()
-                val scheduledTime = currentTodo.reminderTime
-                val scheduledText = scheduledTime?.let {
-                    SimpleDateFormat("EEEE, MMM dd yyyy, HH:mm", Locale.getDefault()).format(Date(it))
-                } ?: "Not scheduled"
-                val isOverdueReminder = scheduledTime != null && !currentTodo.isCompleted && scheduledTime < now
-
+                DetailSectionLabel("Schedule")
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -400,7 +286,7 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Scheduled for", style = MaterialTheme.typography.labelMedium)
                             Text(
-                                text = if (isOverdueReminder) "Overdue · $scheduledText" else scheduledText,
+                                text = if (isOverdueReminder) "Overdue: $scheduledText" else scheduledText,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = if (isOverdueReminder) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                             )
@@ -408,19 +294,17 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
                 if (currentTodo.recurrenceType() == RecurrenceType.NONE) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
+                        FilledTonalButton(onClick = {
                             showTimePickerDialog = true
                         }, modifier = Modifier.weight(1f)) {
                             Icon(Icons.Default.Schedule, null)
                             Spacer(Modifier.width(6.dp))
                             Text("Today", maxLines = 1)
                         }
-                        
-                        Button(onClick = {
+
+                        FilledTonalButton(onClick = {
                             showDarkDateTimePicker(context) {
                                 val updated = currentTodo.copy(reminderTime = it)
                                 viewModel.update(updated)
@@ -433,26 +317,180 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                             Text("Custom", maxLines = 1)
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
 
                 if (currentTodo.reminderTime != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    FilledTonalButton(
+                    TextButton(
                         onClick = {
                             AlarmScheduler.cancel(context, currentTodo)
                             viewModel.update(currentTodo.copy(reminderTime = null))
                             ToastUtils.show(context, "Reminder cleared")
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.align(Alignment.End)
                     ) {
                         Icon(Icons.Default.Close, null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Clear Reminder", maxLines = 1)
+                        Text("Clear reminder")
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
+
+                DetailSectionLabel("Repeat")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val recurrenceType = currentTodo.recurrenceType()
+                    FilterChip(
+                        selected = recurrenceType == RecurrenceType.NONE,
+                        onClick = {
+                            val updated = currentTodo.copy(recurrence = RecurrenceType.NONE.name)
+                            viewModel.update(updated)
+                        },
+                        label = { Text("Off") }
+                    )
+                    FilterChip(
+                        selected = recurrenceType == RecurrenceType.DAILY,
+                        onClick = { showDailyTimeDialog = true },
+                        label = { Text("Daily") }
+                    )
+                    FilterChip(
+                        selected = recurrenceType == RecurrenceType.WEEKLY,
+                        onClick = { showWeeklyDialog = true },
+                        label = { Text("Weekly") }
+                    )
+                }
+
+                DetailSectionLabel("Reminder behavior")
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Switch(
+                            checked = currentTodo.isHighPriority,
+                            onCheckedChange = {
+                                val updated = currentTodo.copy(isHighPriority = it)
+                                viewModel.update(updated)
+                                ToastUtils.show(context, if (it) "High priority enabled" else "Low priority")
+                            },
+                            enabled = !currentTodo.isFullScreenReminder,
+                            colors = switchColors
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "High priority",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (currentTodo.isFullScreenReminder) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                            )
+                            if (currentTodo.isFullScreenReminder) {
+                                Text(
+                                    "Auto on with full-screen reminders",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Switch(
+                            checked = currentTodo.isFullScreenReminder,
+                            onCheckedChange = { enabled ->
+                                if (enabled && !canUseFullScreenIntentPermission(context)) {
+                                    openFullScreenIntentSettings(context)
+                                    canUseFullScreenIntent = false
+                                    ToastUtils.show(context, "Allow full-screen reminders in system settings")
+                                } else {
+                                    canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
+                                    val updated = currentTodo.copy(isFullScreenReminder = enabled)
+                                    viewModel.update(updated)
+                                    ToastUtils.show(context, if (enabled) "Full-screen reminder enabled" else "Full-screen reminder disabled")
+                                }
+                            },
+                            colors = switchColors
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Full-screen reminder", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (canUseFullScreenIntent) "Shows over lock screen when reminder triggers."
+                                else "Permission needed on this Android version.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (!canUseFullScreenIntent) {
+                        TextButton(onClick = {
+                            openFullScreenIntentSettings(context)
+                            canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
+                        }) {
+                            Text("Open full-screen permission")
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Switch(
+                            checked = currentTodo.isOneOffTask,
+                            onCheckedChange = {
+                                val updated = currentTodo.copy(isOneOffTask = it)
+                                viewModel.update(updated)
+                                ToastUtils.show(context, if (it) "Auto-delete enabled" else "Auto-delete disabled")
+                            },
+                            colors = switchColors
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Auto-delete when done", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "Applies to non-recurring tasks.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                DetailSectionLabel("Attachments")
+                if (currentTodo.attachments.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(currentTodo.attachments) { uriStr ->
+                            AttachmentItem(uriStr = uriStr, onRemove = {
+                                val updated = currentTodo.copy(attachments = currentTodo.attachments - uriStr)
+                                viewModel.update(updated)
+                                ToastUtils.show(context, "Attachment removed")
+                            })
+                        }
+                    }
+                    OutlinedButton(onClick = { launcher.launch("*/*") }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.AddCircleOutline, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add files")
+                    }
+                } else {
+                    OutlinedButton(onClick = { launcher.launch("*/*") }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Upload files")
+                    }
+                }
+
+                DetailSectionLabel("Metadata")
+                Text("Added on $addedDate", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(
+                    onClick = { showDeleteConfirm = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Delete task", color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
 
                 if (showDailyTimeDialog) {
                     val cal = Calendar.getInstance().apply {
@@ -622,4 +660,26 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
             }
         }
     }
+}
+
+@Composable
+private fun DetailSectionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary
+    )
+}
+
+@Composable
+private fun detailSwitchColors(): SwitchColors {
+    return SwitchDefaults.colors(
+        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+        uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+        disabledUncheckedThumbColor = MaterialTheme.colorScheme.outline,
+        disabledUncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
+        disabledUncheckedBorderColor = MaterialTheme.colorScheme.outline,
+        disabledUncheckedIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }

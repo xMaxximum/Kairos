@@ -143,7 +143,7 @@ class TaskApi(
 
         if (status !in 200..299) {
             val error = readableError(text, status)
-            throw TaskApiException(error.message, status, error.code)
+            throw TaskApiException(error.message, status, error.code, error.serverTask)
         }
         if (!allowEmpty && text.isBlank()) {
             throw TaskApiException("Empty response")
@@ -155,7 +155,8 @@ class TaskApi(
 class TaskApiException(
     message: String,
     val statusCode: Int = 0,
-    val code: String? = null
+    val code: String? = null,
+    val serverTask: RemoteTask? = null
 ) : Exception(message)
 
 private fun Todo.toCreateJson(): JSONObject {
@@ -217,18 +218,19 @@ private fun JSONObject.toRemoteTask(): RemoteTask {
     )
 }
 
-private data class ErrorResponse(val message: String, val code: String?)
+private data class ErrorResponse(val message: String, val code: String?, val serverTask: RemoteTask?)
 
 private fun readableError(text: String, status: Int): ErrorResponse {
-    if (text.isBlank()) return ErrorResponse("HTTP $status", null)
+    if (text.isBlank()) return ErrorResponse("HTTP $status", null, null)
     return runCatching {
         val json = JSONObject(text)
         ErrorResponse(
             message = json.optString("error").takeIf { it.isNotBlank() } ?: text,
-            code = json.optNullableString("code")
+            code = json.optNullableString("code"),
+            serverTask = json.optJSONObject("serverTask")?.toRemoteTask()
         )
     }.getOrElse {
-        ErrorResponse(text, null)
+        ErrorResponse(text, null, null)
     }
 }
 

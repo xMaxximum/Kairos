@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -79,13 +80,16 @@ fun AddTodoScreen(
     
     val focusRequester = remember { FocusRequester() }
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val isDebugBuild = remember(context) {
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
 
     LaunchedEffect(isActive) {
         if (isActive) {
+            delay(100)
             focusRequester.requestFocus()
+            keyboardController?.show()
         }
     }
 
@@ -137,8 +141,11 @@ fun AddTodoScreen(
                     }
                     
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         IconButton(onClick = { showReminderPopup = !showReminderPopup }) {
                             Icon(
@@ -148,28 +155,42 @@ fun AddTodoScreen(
                             )
                         }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = isHighPriority, onCheckedChange = { isHighPriority = it })
-                                Text("High Priority", style = MaterialTheme.typography.bodySmall)
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = isOneOffTask, onCheckedChange = { isOneOffTask = it })
-                                Text("Auto-delete when done", style = MaterialTheme.typography.bodySmall)
-                            }
-
-                            if (reminderTime != null) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = isFullScreen, onCheckedChange = { isFullScreen = it })
-                                    Text("Full Screen", style = MaterialTheme.typography.bodySmall)
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilterChip(
+                                selected = isHighPriority,
+                                onClick = { isHighPriority = !isHighPriority },
+                                label = { Text("High") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.PriorityHigh, contentDescription = null, modifier = Modifier.size(16.dp))
                                 }
+                            )
+                            FilterChip(
+                                selected = isOneOffTask,
+                                onClick = { isOneOffTask = !isOneOffTask },
+                                label = { Text("Auto-delete") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            )
+                            if (reminderTime != null) {
+                                FilterChip(
+                                    selected = isFullScreen,
+                                    onClick = { isFullScreen = !isFullScreen },
+                                    label = { Text("Full-screen") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.OpenInFull, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                )
                             }
                         }
-
-                        Spacer(modifier = Modifier.weight(1f))
                         
-                        Button(
+                        FilledIconButton(
                             onClick = {
                                 if (title.isNotBlank()) {
                                     onSave(
@@ -191,11 +212,9 @@ fun AddTodoScreen(
                                     ToastUtils.show(context, "Task Saved!")
                                 }
                             },
-                            shape = RoundedCornerShape(12.dp)
+                            enabled = title.isNotBlank()
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Save")
                         }
                     }
                 }

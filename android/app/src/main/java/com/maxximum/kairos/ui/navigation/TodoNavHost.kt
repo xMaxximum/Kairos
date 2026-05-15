@@ -36,7 +36,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -83,33 +82,17 @@ fun TodoNavHost(
     var selectedTodoId by remember { mutableStateOf(if (initialTodoId > 0) initialTodoId else -1) }
     var allowDetailFromClick by remember { mutableStateOf(initialTodoId > 0) }
     var showSettingsScreen by remember { mutableStateOf(false) }
+    var settingsReturnPage by remember { mutableIntStateOf(if (initialTodoId > 0) 2 else 0) }
     val syncState by viewModel.syncState.collectAsState()
+    val mainPageCount = if (selectedTodoId > 0 && allowDetailFromClick) 3 else 2
+    val settingsPage = mainPageCount
 
     val pagerState = rememberPagerState(
         initialPage = if (initialTodoId > 0) 2 else 0,
         pageCount = {
-            if (selectedTodoId > 0 && allowDetailFromClick) 3 else 2
+            mainPageCount + if (showSettingsScreen) 1 else 0
         }
     )
-
-    if (showSettingsScreen) {
-        SettingsScreen(
-            onBack = { showSettingsScreen = false },
-            authState = authState,
-            onLogin = onLogin,
-            onRegister = onRegister,
-            onLogout = onLogout,
-            onServerChanged = onServerChanged,
-            onExportBackup = { uri ->
-                viewModel.exportBackup(uri) { _, message ->
-                    ToastUtils.show(context, message)
-                }
-            },
-            syncState = syncState,
-            onSyncNow = viewModel::syncNow
-        )
-        return
-    }
 
     LaunchedEffect(initialTodoId) {
         if (initialTodoId > 0) {
@@ -118,6 +101,12 @@ fun TodoNavHost(
             if (pagerState.currentPage != 2) {
                 pagerState.scrollToPage(2)
             }
+        }
+    }
+
+    LaunchedEffect(showSettingsScreen, settingsPage) {
+        if (showSettingsScreen && pagerState.currentPage != settingsPage) {
+            pagerState.animateScrollToPage(settingsPage)
         }
     }
 
@@ -134,19 +123,27 @@ fun TodoNavHost(
         }
     }
 
-    BackHandler(enabled = pagerState.currentPage == 2) {
+    BackHandler(enabled = showSettingsScreen && pagerState.currentPage == settingsPage) {
+        showSettingsScreen = false
+        scope.launch { pagerState.animateScrollToPage(settingsReturnPage.coerceIn(0, mainPageCount - 1)) }
+    }
+
+    BackHandler(enabled = !showSettingsScreen && pagerState.currentPage == 2) {
         scope.launch { pagerState.animateScrollToPage(1) }
     }
 
-    BackHandler(enabled = pagerState.currentPage == 1) {
+    BackHandler(enabled = !showSettingsScreen && pagerState.currentPage == 1) {
         scope.launch { pagerState.animateScrollToPage(0) }
     }
 
     LaunchedEffect(pagerState.settledPage) {
-        if (pagerState.settledPage == 2 && !allowDetailFromClick) {
+        if (showSettingsScreen && pagerState.settledPage != settingsPage) {
+            showSettingsScreen = false
+        }
+        if (!showSettingsScreen && pagerState.settledPage == 2 && !allowDetailFromClick) {
             scope.launch { pagerState.animateScrollToPage(1) }
         }
-        if (pagerState.settledPage != 2) {
+        if (!showSettingsScreen && pagerState.settledPage != 2) {
             allowDetailFromClick = false
         }
     }
@@ -157,10 +154,34 @@ fun TodoNavHost(
         beyondViewportPageCount = 1,
         modifier = Modifier.fillMaxSize()
     ) { page ->
-        when (page) {
-            0 -> AddTodoScreen(
+        when {
+            page == settingsPage && showSettingsScreen -> {
+                SettingsScreen(
+                    onBack = {
+                        showSettingsScreen = false
+                        scope.launch { pagerState.animateScrollToPage(settingsReturnPage.coerceIn(0, mainPageCount - 1)) }
+                    },
+                    authState = authState,
+                    onLogin = onLogin,
+                    onRegister = onRegister,
+                    onLogout = onLogout,
+                    onServerChanged = onServerChanged,
+                    onExportBackup = { uri ->
+                        viewModel.exportBackup(uri) { _, message ->
+                            ToastUtils.show(context, message)
+                        }
+                    },
+                    syncState = syncState,
+                    onSyncNow = viewModel::syncNow
+                )
+            }
+
+            page == 0 -> AddTodoScreen(
                 isActive = pagerState.currentPage == 0,
-                onSettings = { showSettingsScreen = true },
+                onSettings = {
+                    settingsReturnPage = pagerState.currentPage
+                    showSettingsScreen = true
+                },
                 onSave = { todo ->
                     viewModel.insert(todo) { id ->
                         val savedTodo = todo.copy(id = id.toInt())
@@ -170,7 +191,7 @@ fun TodoNavHost(
                 onViewAll = { scope.launch { pagerState.animateScrollToPage(1) } }
             )
 
-            1 -> TodoListScreen(
+            page == 1 -> TodoListScreen(
                 viewModel = viewModel,
                 onTodoClick = { todoId ->
                     selectedTodoId = todoId
@@ -182,10 +203,13 @@ fun TodoNavHost(
                 onRegister = onRegister,
                 onLogout = onLogout,
                 onServerChanged = onServerChanged,
-                onSettings = { showSettingsScreen = true }
+                onSettings = {
+                    settingsReturnPage = pagerState.currentPage
+                    showSettingsScreen = true
+                }
             )
 
-            2 -> {
+            page == 2 -> {
                 if (selectedTodoId > 0) {
                     TodoDetailScreen(
                         todoId = selectedTodoId,
