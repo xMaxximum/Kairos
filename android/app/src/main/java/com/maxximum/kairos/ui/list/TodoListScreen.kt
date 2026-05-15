@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,6 +83,8 @@ fun TodoListScreen(
     var selectedTodos by remember { mutableStateOf(setOf<Int>()) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var currentFilter by remember { mutableStateOf(TodoFilter.ALL) }
+    var isSearchOpen by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var wasSyncing by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
@@ -121,7 +124,8 @@ fun TodoListScreen(
         wasSyncing = syncState.isSyncing
     }
 
-    val filteredTodos = remember(todos, currentFilter) {
+    val filteredTodos = remember(todos, currentFilter, searchQuery) {
+        val normalizedQuery = searchQuery.trim().lowercase(Locale.getDefault())
         todos.filter { 
             when (currentFilter) {
                 TodoFilter.ALL -> !it.isArchived
@@ -129,6 +133,8 @@ fun TodoListScreen(
                 TodoFilter.COMPLETED -> !it.isArchived && it.isCompleted
                 TodoFilter.ARCHIVED -> it.isArchived
             }
+        }.filter { todo ->
+            normalizedQuery.isBlank() || todo.matchesSearch(normalizedQuery)
         }.sortedBy { it.reminderTime ?: Long.MAX_VALUE }
     }
 
@@ -147,7 +153,17 @@ fun TodoListScreen(
         topBar = {
             TopAppBar(
                 title = { 
-                    Column {
+                    if (isSearchOpen && !isSelectionMode) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("Search tasks") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                        )
+                    } else {
+                        Column {
                         if (isSelectionMode) {
                             Text("${selectedTodos.size} selected")
                         } else {
@@ -159,14 +175,27 @@ fun TodoListScreen(
                                     }
                                 }
                             }
-                            Text(currentFilter.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            val subtitle = if (searchQuery.isBlank()) currentFilter.label else "${currentFilter.label} / search"
+                            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
                         }
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = {
-                        if (isSelectionMode) { isSelectionMode = false; selectedTodos = emptySet() } else onBack()
-                    }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                        if (isSearchOpen) {
+                            isSearchOpen = false
+                            searchQuery = ""
+                        } else if (isSelectionMode) {
+                            isSelectionMode = false
+                            selectedTodos = emptySet()
+                        } else {
+                            onBack()
+                        }
+                    }) {
+                        val icon = if (isSearchOpen) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack
+                        Icon(icon, contentDescription = "Back")
+                    }
                 },
                 actions = {
                     if (isSelectionMode) {
@@ -182,6 +211,17 @@ fun TodoListScreen(
                             isSelectionMode = false; selectedTodos = emptySet()
                         }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                     } else {
+                        if (isSearchOpen) {
+                            if (searchQuery.isNotBlank()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                                }
+                            }
+                        } else {
+                            IconButton(onClick = { isSearchOpen = true }) {
+                                Icon(Icons.Default.Search, contentDescription = "Search")
+                            }
+                        }
                         IconButton(onClick = onSettings) {
                             Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
@@ -284,6 +324,14 @@ fun TodoListScreen(
             }
         }
     }
+}
+
+private fun Todo.matchesSearch(query: String): Boolean {
+    val reminder = reminderTime?.let {
+        SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(it))
+    }.orEmpty()
+    return listOf(title, description, recurrence, reminder)
+        .any { it.lowercase(Locale.getDefault()).contains(query) }
 }
 
 @Composable

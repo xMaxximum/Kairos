@@ -14,7 +14,7 @@ export default defineNuxtConfig({
       title: 'Kairos',
       meta: [
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { name: 'theme-color', content: '#101314' }
+        { name: 'theme-color', content: '#111018' }
       ]
     }
   }

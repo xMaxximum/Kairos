@@ -21,10 +21,12 @@ export const useTasksStore = defineStore('tasks', () => {
   const isLoading = ref(false)
   const isSaving = ref(false)
   const filter = ref<TaskFilter>('active')
+  const searchQuery = ref('')
   const message = ref('')
   const lastSyncedAt = ref<number | null>(null)
 
   const visibleTasks = computed(() => {
+    const query = searchQuery.value.trim().toLowerCase()
     return tasks.value
       .filter((task) => !task.deletedAt)
       .filter((task) => {
@@ -32,6 +34,15 @@ export const useTasksStore = defineStore('tasks', () => {
         if (filter.value === 'pending') return !task.isArchived && !task.isCompleted
         if (filter.value === 'done') return !task.isArchived && task.isCompleted
         return task.isArchived
+      })
+      .filter((task) => {
+        if (!query) return true
+        return [
+          task.title,
+          task.description,
+          task.recurrence,
+          task.reminderTime ? new Date(task.reminderTime).toLocaleString() : ''
+        ].some((value) => value.toLowerCase().includes(query))
       })
       .sort((a, b) => {
         const aTime = a.reminderTime ? Date.parse(a.reminderTime) : Number.MAX_SAFE_INTEGER
@@ -161,6 +172,7 @@ export const useTasksStore = defineStore('tasks', () => {
     visibleTasks,
     counts,
     filter,
+    searchQuery,
     isLoading,
     isSaving,
     message,

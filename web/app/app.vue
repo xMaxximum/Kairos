@@ -7,8 +7,9 @@ import {
   LogOut,
   Plus,
   RefreshCw,
+  Search,
+  Settings,
   Star,
-  RotateCcw,
   Trash2
 } from 'lucide-vue-next'
 import type { TaskItem } from '~/types/kairos'
@@ -27,6 +28,7 @@ const isHighPriority = ref(false)
 const isFullScreenReminder = ref(false)
 const isOneOffTask = ref(false)
 const selectedTaskId = ref<string | null>(null)
+const settingsOpen = ref(false)
 const toast = ref('')
 
 const selectedTask = computed(() => {
@@ -143,6 +145,7 @@ async function deleteTask(task: TaskItem) {
 
 function logout() {
   auth.logout()
+  settingsOpen.value = false
   selectedTaskId.value = null
   showToast('Signed out.')
 }
@@ -185,9 +188,18 @@ function formatReminder(iso: string | null) {
           <p class="eyebrow">Kairos</p>
           <h1>Tasks</h1>
         </div>
-        <button v-if="auth.isAuthenticated" class="icon-button" type="button" title="Refresh" @click="safeRefresh">
-          <RefreshCw :size="18" :class="{ spinning: tasks.isLoading }" />
-        </button>
+        <div v-if="auth.isAuthenticated" class="settings-menu">
+          <button class="icon-button" type="button" title="Settings" @click="settingsOpen = !settingsOpen">
+            <Settings :size="18" />
+          </button>
+          <div v-if="settingsOpen" class="settings-popover">
+            <p class="muted">{{ auth.user?.email }}</p>
+            <button class="secondary-button" type="button" @click="logout">
+              <LogOut :size="15" />
+              Logout
+            </button>
+          </div>
+        </div>
       </div>
 
       <form v-if="!auth.isAuthenticated" class="auth-panel" @submit.prevent="submitAuth">
@@ -216,14 +228,6 @@ function formatReminder(iso: string | null) {
       </form>
 
       <template v-else>
-        <div class="account-row">
-          <span>{{ auth.user?.email }}</span>
-          <button class="text-button" type="button" @click="logout">
-            <LogOut :size="15" />
-            Logout
-          </button>
-        </div>
-
         <form class="create-panel" @submit.prevent="createTask">
           <label>
             New task
@@ -287,10 +291,16 @@ function formatReminder(iso: string | null) {
           <h2>{{ auth.isAuthenticated ? 'Task list' : 'Offline cache' }}</h2>
           <p>{{ auth.isAuthenticated ? `Last sync: ${lastSyncText}` : 'Sign in to load your tasks.' }}</p>
         </div>
-        <button v-if="auth.isAuthenticated" class="secondary-button" type="button" @click="safeRefresh">
-          <RefreshCw :size="16" />
-          Sync
-        </button>
+        <div v-if="auth.isAuthenticated" class="surface-tools">
+          <label class="search-field">
+            <Search :size="16" />
+            <input v-model="tasks.searchQuery" type="search" placeholder="Search tasks">
+          </label>
+          <button class="secondary-button" type="button" title="Sync tasks" @click="safeRefresh">
+            <RefreshCw :size="16" :class="{ spinning: tasks.isLoading }" />
+            Sync
+          </button>
+        </div>
       </div>
 
       <div v-if="!auth.isAuthenticated && tasks.visibleTasks.length === 0" class="empty-state">
