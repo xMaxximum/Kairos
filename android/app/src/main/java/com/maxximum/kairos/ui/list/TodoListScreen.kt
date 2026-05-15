@@ -75,7 +75,8 @@ fun TodoListScreen(
     onRegister: (String, String) -> Unit = { _, _ -> },
     onLogout: () -> Unit = {},
     onServerChanged: (String) -> Unit = {},
-    onSettings: () -> Unit = {}
+    onSettings: () -> Unit = {},
+    onNotes: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val todos by viewModel.allTodos.collectAsState(initial = emptyList())
@@ -246,6 +247,9 @@ fun TodoListScreen(
                         } else {
                             IconButton(onClick = onSettings) {
                                 Icon(Icons.Default.Settings, contentDescription = "Settings")
+                            }
+                            IconButton(onClick = onNotes) {
+                                Icon(Icons.Default.Note, contentDescription = "Notes")
                             }
                             Box {
                                 IconButton(onClick = { filterMenuExpanded = true }) {

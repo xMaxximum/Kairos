@@ -6,6 +6,8 @@ import com.maxximum.kairos.data.auth.ApiServerStore
 import com.maxximum.kairos.data.auth.AuthSessionStore
 import com.maxximum.kairos.data.local.AppDatabase
 import com.maxximum.kairos.data.local.LocalTodoRepository
+import com.maxximum.kairos.data.local.SyncConflict
+import com.maxximum.kairos.data.local.SyncConflictDao
 import com.maxximum.kairos.data.local.TodoRepository
 import com.maxximum.kairos.data.remote.AuthApi
 import com.maxximum.kairos.data.remote.AuthApiException
@@ -26,11 +28,13 @@ data class TodoSyncSummary(
     val updated: Int,
     val pendingAfterSync: Int,
     val skipped: Boolean = false,
-    val recoverableConflicts: Int = 0
+    val conflicts: Int = 0,
+    val autoMerged: Int = 0
 ) {
     fun statusMessage(): String {
         if (skipped) return "Sign in before syncing."
-        if (recoverableConflicts > 0) return "Some tasks changed elsewhere. Sync again to retry."
+        if (conflicts > 0) return "$conflicts task${if (conflicts == 1) "" else "s"} need conflict review in Settings."
+        if (autoMerged > 0) return "Auto-merged $autoMerged task${if (autoMerged == 1) "" else "s"}. Pending $pendingAfterSync."
         return "Uploaded $uploaded, deleted $deleted. Server returned $remoteReturned; imported $imported, updated $updated. Pending $pendingAfterSync."
     }
 }
@@ -38,6 +42,7 @@ data class TodoSyncSummary(
 class TodoSyncer(
     private val context: Context,
     private val repository: TodoRepository = LocalTodoRepository(AppDatabase.getDatabase(context).todoDao()),
+    private val conflictDao: SyncConflictDao = AppDatabase.getDatabase(context).syncConflictDao(),
     private val apiServerStore: ApiServerStore = ApiServerStore(context),
     private val sessionStore: AuthSessionStore = AuthSessionStore(context)
 ) {
@@ -64,7 +69,8 @@ class TodoSyncer(
         val pendingTodos = repository.getPendingSyncTodos()
         var uploaded = 0
         var deleted = 0
-        var recoverableConflicts = 0
+        var conflicts = 0
+        var autoMerged = 0
 
         pendingTodos.forEach { todo ->
             if (todo.deletedAt != null) {
@@ -76,8 +82,13 @@ class TodoSyncer(
                     }
                 } catch (error: TaskApiException) {
                     if (error.isRecoverableTaskConflict()) {
-                        recoverTaskConflict(accessToken, todo, error)
-                        recoverableConflicts += 1
+                        when (recoverTaskConflict(accessToken, todo, error)) {
+                            ConflictRecovery.AutoMergedUploaded -> {
+                                deleted += 1
+                                autoMerged += 1
+                            }
+                            ConflictRecovery.ManualConflict -> conflicts += 1
+                        }
                         return@forEach
                     }
                     throw error
@@ -91,8 +102,13 @@ class TodoSyncer(
                     uploadTask(accessToken, todo)
                 } catch (error: TaskApiException) {
                     if (error.isRecoverableTaskConflict()) {
-                        recoverTaskConflict(accessToken, todo, error)
-                        recoverableConflicts += 1
+                        when (recoverTaskConflict(accessToken, todo, error)) {
+                            ConflictRecovery.AutoMergedUploaded -> {
+                                uploaded += 1
+                                autoMerged += 1
+                            }
+                            ConflictRecovery.ManualConflict -> conflicts += 1
+                        }
                         return@forEach
                     }
                     throw error
@@ -111,7 +127,9 @@ class TodoSyncer(
             val local = repository.getTodoByClientId(remote.clientId)
             if (local == null) {
                 if (remote.deletedAt == null) {
-                    val todo = remote.toTodo()
+                    val todo = remote.toTodo().copy(
+                        baseSnapshotJson = TaskSyncSnapshots.encode(remote.toTaskSyncSnapshot())
+                    )
                     val localId = repository.insertSyncedTodo(todo).toInt()
                     val savedTodo = todo.copy(id = localId)
                     scheduleIfNeeded(savedTodo)
@@ -136,7 +154,8 @@ class TodoSyncer(
             imported = imported,
             updated = updated,
             pendingAfterSync = repository.getPendingSyncCount(),
-            recoverableConflicts = recoverableConflicts
+            conflicts = conflicts,
+            autoMerged = autoMerged
         )
     }
 
@@ -167,15 +186,89 @@ class TodoSyncer(
         }
     }
 
-    private suspend fun recoverTaskConflict(accessToken: String, local: Todo, error: TaskApiException) {
+    private suspend fun recoverTaskConflict(accessToken: String, local: Todo, error: TaskApiException): ConflictRecovery {
         val serverTask = error.serverTask ?: taskApi.getTasks(accessToken).firstOrNull { it.clientId == local.clientId }
         if (serverTask != null) {
-            val current = repository.getTodoByClientId(local.clientId) ?: return
+            val current = repository.getTodoByClientId(local.clientId) ?: return ConflictRecovery.ManualConflict
             if (current.syncStatus != SyncStatus.SYNCED.name) {
-                // TODO: Add a conflict inbox that stores both copies and lets the user compare local vs server.
-                repository.updateTodo(current.withRemoteMetadata(serverTask))
+                val serverSnapshot = serverTask.toTaskSyncSnapshot()
+                val serverSnapshotJson = TaskSyncSnapshots.encode(serverSnapshot)
+                val localSnapshot = current.toTaskSyncSnapshot()
+                val baseSnapshot = TaskSyncSnapshots.decode(current.baseSnapshotJson)
+
+                if (baseSnapshot != null && current.deletedAt == null && serverSnapshot.deletedAt == null) {
+                    val localChangedFields = TaskSyncSnapshots.changedFields(baseSnapshot, localSnapshot)
+                    val serverChangedFields = TaskSyncSnapshots.changedFields(baseSnapshot, serverSnapshot)
+                    val overlappingFields = localChangedFields.intersect(serverChangedFields)
+                    if (overlappingFields.isEmpty()) {
+                        val mergedSnapshot = TaskSyncSnapshots.merge(serverSnapshot, localSnapshot, localChangedFields)
+                        val mergedTodo = mergedSnapshot.toTodo(current).copy(
+                            serverId = serverTask.id,
+                            remoteUpdatedAt = serverSnapshot.remoteUpdatedAt,
+                            baseSnapshotJson = serverSnapshotJson,
+                            lastSyncedAt = System.currentTimeMillis()
+                        )
+                        repository.updateDirtyTodo(mergedTodo)
+                        return uploadRecoveredMerge(accessToken, mergedTodo)
+                    }
+
+                    storeManualConflict(current, localSnapshot, serverSnapshot, overlappingFields.ifEmpty { localChangedFields + serverChangedFields })
+                } else {
+                    val fields = if (baseSnapshot == null) {
+                        TaskSyncSnapshots.mergeableFields.toSet()
+                    } else {
+                        TaskSyncSnapshots.changedFields(baseSnapshot, localSnapshot) +
+                            TaskSyncSnapshots.changedFields(baseSnapshot, serverSnapshot)
+                    }
+                    storeManualConflict(current, localSnapshot, serverSnapshot, fields)
+                }
             }
         }
+        return ConflictRecovery.ManualConflict
+    }
+
+    private suspend fun uploadRecoveredMerge(accessToken: String, mergedTodo: Todo): ConflictRecovery {
+        return try {
+            val remote = if (mergedTodo.deletedAt == null) {
+                uploadTask(accessToken, mergedTodo)
+            } else {
+                taskApi.deleteTaskByClientId(accessToken, mergedTodo)
+            }
+            val current = repository.getTodoByClientId(mergedTodo.clientId) ?: return ConflictRecovery.ManualConflict
+            if (current.syncStatus == SyncStatus.DIRTY.name) {
+                repository.updateSyncedTodo(remote?.toSyncedLocalTodo(current) ?: current)
+            }
+            ConflictRecovery.AutoMergedUploaded
+        } catch (error: TaskApiException) {
+            ConflictRecovery.ManualConflict
+        }
+    }
+
+    private suspend fun storeManualConflict(
+        current: Todo,
+        localSnapshot: TaskSyncSnapshot,
+        serverSnapshot: TaskSyncSnapshot,
+        conflictedFields: Set<String>
+    ) {
+        val serverSnapshotJson = TaskSyncSnapshots.encode(serverSnapshot)
+        conflictDao.upsert(
+            SyncConflict(
+                objectType = TASK_OBJECT_TYPE,
+                clientId = current.clientId,
+                localSnapshotJson = TaskSyncSnapshots.encode(localSnapshot),
+                serverSnapshotJson = serverSnapshotJson,
+                conflictedFields = conflictedFields.sorted().joinToString(","),
+                detectedAt = System.currentTimeMillis()
+            )
+        )
+        repository.updateConflictedTodo(
+            current.copy(
+                serverId = serverSnapshot.serverId,
+                remoteUpdatedAt = serverSnapshot.remoteUpdatedAt,
+                baseSnapshotJson = serverSnapshotJson,
+                lastSyncedAt = System.currentTimeMillis()
+            )
+        )
     }
 
     private fun TaskApiException.isRecoverableTaskConflict(): Boolean {
@@ -187,6 +280,7 @@ class TodoSyncer(
             serverId = remote.id,
             remoteUpdatedAt = remote.updatedAtMillis,
             lastSyncedAt = System.currentTimeMillis(),
+            baseSnapshotJson = TaskSyncSnapshots.encode(remote.toTaskSyncSnapshot()),
             syncStatus = SyncStatus.DIRTY.name
         )
     }
@@ -194,7 +288,8 @@ class TodoSyncer(
     private fun RemoteTask.toSyncedLocalTodo(local: Todo): Todo {
         return toTodo().copy(
             id = local.id,
-            timestamp = local.timestamp
+            timestamp = local.timestamp,
+            baseSnapshotJson = TaskSyncSnapshots.encode(toTaskSyncSnapshot())
         )
     }
 
@@ -246,5 +341,11 @@ class TodoSyncer(
 
     private companion object {
         val syncMutex = Mutex()
+        const val TASK_OBJECT_TYPE = "task"
+    }
+
+    private enum class ConflictRecovery {
+        AutoMergedUploaded,
+        ManualConflict
     }
 }

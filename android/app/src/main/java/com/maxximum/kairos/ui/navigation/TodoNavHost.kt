@@ -62,6 +62,7 @@ import java.util.*
 import com.maxximum.kairos.ui.add.AddTodoScreen
 import com.maxximum.kairos.ui.detail.TodoDetailScreen
 import com.maxximum.kairos.ui.list.TodoListScreen
+import com.maxximum.kairos.ui.notes.NotesScreen
 import com.maxximum.kairos.ui.settings.SettingsScreen
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -82,13 +83,14 @@ fun TodoNavHost(
     var selectedTodoId by remember { mutableStateOf(if (initialTodoId > 0) initialTodoId else -1) }
     var allowDetailFromClick by remember { mutableStateOf(initialTodoId > 0) }
     var showSettingsScreen by remember { mutableStateOf(false) }
-    var settingsReturnPage by remember { mutableIntStateOf(if (initialTodoId > 0) 2 else 0) }
+    var settingsReturnPage by remember { mutableIntStateOf(if (initialTodoId > 0) 3 else 0) }
     val syncState by viewModel.syncState.collectAsState()
-    val mainPageCount = if (selectedTodoId > 0 && allowDetailFromClick) 3 else 2
+    val syncConflicts by viewModel.syncConflicts.collectAsState(initial = emptyList())
+    val mainPageCount = if (selectedTodoId > 0 && allowDetailFromClick) 4 else 3
     val settingsPage = mainPageCount
 
     val pagerState = rememberPagerState(
-        initialPage = if (initialTodoId > 0) 2 else 0,
+        initialPage = if (initialTodoId > 0) 3 else 0,
         pageCount = {
             mainPageCount + if (showSettingsScreen) 1 else 0
         }
@@ -98,8 +100,8 @@ fun TodoNavHost(
         if (initialTodoId > 0) {
             selectedTodoId = initialTodoId
             allowDetailFromClick = true
-            if (pagerState.currentPage != 2) {
-                pagerState.scrollToPage(2)
+            if (pagerState.currentPage != 3) {
+                pagerState.scrollToPage(3)
             }
         }
     }
@@ -112,7 +114,7 @@ fun TodoNavHost(
 
     LaunchedEffect(selectedTodoId, allowDetailFromClick) {
         if (selectedTodoId > 0 && allowDetailFromClick && pagerState.currentPage == 1) {
-            pagerState.animateScrollToPage(2)
+            pagerState.animateScrollToPage(3)
         }
     }
 
@@ -128,6 +130,10 @@ fun TodoNavHost(
         scope.launch { pagerState.animateScrollToPage(settingsReturnPage.coerceIn(0, mainPageCount - 1)) }
     }
 
+    BackHandler(enabled = !showSettingsScreen && pagerState.currentPage == 3) {
+        scope.launch { pagerState.animateScrollToPage(1) }
+    }
+
     BackHandler(enabled = !showSettingsScreen && pagerState.currentPage == 2) {
         scope.launch { pagerState.animateScrollToPage(1) }
     }
@@ -140,10 +146,10 @@ fun TodoNavHost(
         if (showSettingsScreen && pagerState.settledPage != settingsPage) {
             showSettingsScreen = false
         }
-        if (!showSettingsScreen && pagerState.settledPage == 2 && !allowDetailFromClick) {
+        if (!showSettingsScreen && pagerState.settledPage == 3 && !allowDetailFromClick) {
             scope.launch { pagerState.animateScrollToPage(1) }
         }
-        if (!showSettingsScreen && pagerState.settledPage != 2) {
+        if (!showSettingsScreen && pagerState.settledPage != 3) {
             allowDetailFromClick = false
         }
     }
@@ -172,7 +178,10 @@ fun TodoNavHost(
                         }
                     },
                     syncState = syncState,
-                    onSyncNow = viewModel::syncNow
+                    onSyncNow = viewModel::syncNow,
+                    syncConflicts = syncConflicts,
+                    onKeepMineConflict = viewModel::keepMineForConflict,
+                    onUseServerConflict = viewModel::useServerForConflict
                 )
             }
 
@@ -206,10 +215,18 @@ fun TodoNavHost(
                 onSettings = {
                     settingsReturnPage = pagerState.currentPage
                     showSettingsScreen = true
-                }
+                },
+                onNotes = { scope.launch { pagerState.animateScrollToPage(2) } }
             )
 
             page == 2 -> {
+                NotesScreen(
+                    viewModel = viewModel,
+                    onBack = { scope.launch { pagerState.animateScrollToPage(1) } }
+                )
+            }
+
+            page == 3 -> {
                 if (selectedTodoId > 0) {
                     TodoDetailScreen(
                         todoId = selectedTodoId,

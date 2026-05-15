@@ -26,9 +26,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -39,10 +42,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.maxximum.kairos.app.AuthUiState
 import com.maxximum.kairos.app.SyncUiState
+import com.maxximum.kairos.data.local.SyncConflict
+import com.maxximum.kairos.data.sync.TaskSyncSnapshots
 import com.maxximum.kairos.notifications.NotificationPreferences
 import com.maxximum.kairos.notifications.OverdueNotificationWorker
 import com.maxximum.kairos.ui.auth.AccountSettingsSection
@@ -62,10 +69,14 @@ fun SettingsScreen(
     onServerChanged: (String) -> Unit = {},
     onExportBackup: (Uri) -> Unit = {},
     syncState: SyncUiState = SyncUiState(),
-    onSyncNow: () -> Unit = {}
+    onSyncNow: () -> Unit = {},
+    syncConflicts: List<SyncConflict> = emptyList(),
+    onKeepMineConflict: (SyncConflict) -> Unit = {},
+    onUseServerConflict: (SyncConflict) -> Unit = {}
 ) {
     BackHandler { onBack() }
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val isDebugBuild = remember(context) {
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
@@ -160,6 +171,80 @@ fun SettingsScreen(
                     Icon(Icons.Filled.Sync, contentDescription = null)
                 }
                 Text("Sync now")
+            }
+            if (syncConflicts.isNotEmpty()) {
+                Text(
+                    "Conflict inbox",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "These tasks changed on more than one device. Pick the version to keep before they sync again.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                syncConflicts.forEach { conflict ->
+                    val localSnapshot = remember(conflict.localSnapshotJson) {
+                        TaskSyncSnapshots.decode(conflict.localSnapshotJson)
+                    }
+                    val serverSnapshot = remember(conflict.serverSnapshotJson) {
+                        TaskSyncSnapshots.decode(conflict.serverSnapshotJson)
+                    }
+                    val fields = remember(conflict.conflictedFields) {
+                        conflict.conflictedFields.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                    }
+                    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                localSnapshot?.title ?: serverSnapshot?.title ?: "Task conflict",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            fields.take(5).forEach { field ->
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        TaskSyncSnapshots.displayName(field),
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
+                                    Text(
+                                        "Mine: ${TaskSyncSnapshots.displayValue(localSnapshot, field)}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Text(
+                                        "Server: ${TaskSyncSnapshots.displayValue(serverSnapshot, field)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { onKeepMineConflict(conflict) }) {
+                                    Text("Keep Mine")
+                                }
+                                OutlinedButton(onClick = { onUseServerConflict(conflict) }) {
+                                    Text("Use Server")
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(
+                                    onClick = {
+                                        val text = listOfNotNull(
+                                            serverSnapshot?.title,
+                                            serverSnapshot?.description?.takeIf { it.isNotBlank() }
+                                        ).joinToString("\n\n")
+                                        clipboard.setText(AnnotatedString(text))
+                                    }
+                                ) {
+                                    Text("Copy Server Text")
+                                }
+                                TextButton(onClick = {}) {
+                                    Text("Resolve Later")
+                                }
+                            }
+                        }
+                    }
+                }
             }
             HorizontalDivider()
             Text(

@@ -71,6 +71,7 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scrollState = remember(todoId) { androidx.compose.foundation.ScrollState(0) }
     var showTimePickerDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDailyTimeDialog by remember { mutableStateOf(false) }
@@ -107,6 +108,9 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
     }
 
     LaunchedEffect(todo?.id) {
+        scrollState.scrollTo(0)
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
         titleDraft = todo?.title.orEmpty()
         descriptionDraft = todo?.description.orEmpty()
         canUseFullScreenIntent = canUseFullScreenIntentPermission(context)
@@ -190,7 +194,7 @@ fun TodoDetailScreen(todoId: Int, viewModel: TodoViewModel, onBack: () -> Unit) 
                 modifier = Modifier
                     .padding(innerPadding)
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null

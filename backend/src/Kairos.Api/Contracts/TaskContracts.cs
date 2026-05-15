@@ -17,6 +17,10 @@ public sealed record TaskResponse(
     bool IsArchived,
     bool IsOneOffTask);
 
+public sealed record TaskChangesResponse(
+    IReadOnlyList<TaskResponse> Tasks,
+    DateTimeOffset Cursor);
+
 public sealed record CreateTaskRequest(
     Guid? ClientId,
     string Title,

@@ -15,6 +15,8 @@ interface TodoRepository {
     suspend fun insertTodo(todo: Todo): Long
     suspend fun insertSyncedTodo(todo: Todo): Long
     suspend fun updateTodo(todo: Todo)
+    suspend fun updateDirtyTodo(todo: Todo)
+    suspend fun updateConflictedTodo(todo: Todo)
     suspend fun updateSyncedTodo(todo: Todo)
     suspend fun deleteTodo(todo: Todo)
 }
@@ -39,6 +41,10 @@ class LocalTodoRepository(private val todoDao: TodoDao) : TodoRepository {
 
     override suspend fun updateTodo(todo: Todo) = todoDao.updateTodo(todo.asDirty())
 
+    override suspend fun updateDirtyTodo(todo: Todo) = todoDao.updateTodo(todo.asForcedDirty())
+
+    override suspend fun updateConflictedTodo(todo: Todo) = todoDao.updateTodo(todo.asConflict())
+
     override suspend fun updateSyncedTodo(todo: Todo) = todoDao.updateTodo(todo.asSynced())
 
     override suspend fun deleteTodo(todo: Todo) = todoDao.updateTodo(todo.asDeleted())
@@ -48,8 +54,20 @@ private fun Todo.asDirty(): Todo {
     val now = System.currentTimeMillis()
     return copy(
         updatedAt = now,
+        syncStatus = if (syncStatus == SyncStatus.CONFLICT.name) SyncStatus.CONFLICT.name else SyncStatus.DIRTY.name
+    )
+}
+
+private fun Todo.asForcedDirty(): Todo {
+    val now = System.currentTimeMillis()
+    return copy(
+        updatedAt = now,
         syncStatus = SyncStatus.DIRTY.name
     )
+}
+
+private fun Todo.asConflict(): Todo {
+    return copy(syncStatus = SyncStatus.CONFLICT.name)
 }
 
 private fun Todo.asDeleted(): Todo {
@@ -57,7 +75,7 @@ private fun Todo.asDeleted(): Todo {
     return copy(
         deletedAt = now,
         updatedAt = now,
-        syncStatus = SyncStatus.DIRTY.name
+        syncStatus = if (syncStatus == SyncStatus.CONFLICT.name) SyncStatus.CONFLICT.name else SyncStatus.DIRTY.name
     )
 }
 

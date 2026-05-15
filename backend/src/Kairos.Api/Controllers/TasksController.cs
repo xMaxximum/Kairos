@@ -46,6 +46,47 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
             .ToListAsync(cancellationToken);
     }
 
+    [HttpGet("changes")]
+    public async Task<TaskChangesResponse> GetTaskChanges(
+        [FromQuery] DateTimeOffset? since = null,
+        [FromQuery] bool includeDeleted = true,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = GetCurrentUserId();
+        var query = dbContext.Tasks.Where(task => task.UserId == userId);
+        if (since is not null)
+        {
+            query = query.Where(task => task.UpdatedAt > since.Value);
+        }
+        if (!includeDeleted)
+        {
+            query = query.Where(task => task.DeletedAt == null);
+        }
+
+        var tasks = await query
+            .OrderBy(task => task.UpdatedAt)
+            .Select(task => new TaskResponse(
+                task.Id,
+                task.ClientId,
+                task.Title,
+                task.Description,
+                task.CreatedAt,
+                task.UpdatedAt,
+                task.DeletedAt,
+                task.ReminderTime,
+                task.Recurrence,
+                task.IsHighPriority,
+                task.IsFullScreenReminder,
+                task.Attachments,
+                task.IsCompleted,
+                task.IsArchived,
+                task.IsOneOffTask))
+            .ToListAsync(cancellationToken);
+
+        var cursor = tasks.Count == 0 ? since ?? DateTimeOffset.UtcNow : tasks[^1].UpdatedAt;
+        return new TaskChangesResponse(tasks, cursor);
+    }
+
     [HttpPost]
     public async Task<ActionResult<TaskResponse>> CreateTask(CreateTaskRequest request, CancellationToken cancellationToken)
     {
@@ -69,14 +110,15 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
                     "Task is deleted. Restore it before updating.");
             }
             var matchesExisting = MatchesRequest(existing, request);
+            if (matchesExisting)
+            {
+                return Ok(ToResponse(existing));
+            }
+
             if (!matchesExisting)
             {
                 var conflict = ValidateBaseUpdatedAt(existing, request.BaseUpdatedAt);
                 if (conflict is not null) return conflict;
-            }
-            else if (request.BaseUpdatedAt is null)
-            {
-                return Ok(ToResponse(existing));
             }
 
             ApplyRequest(existing, request);
@@ -122,10 +164,17 @@ public sealed class TasksController(AppDbContext dbContext) : ControllerBase
         UpdateTaskRequest request,
         CancellationToken cancellationToken)
     {
-        var task = await FindUserTask(id, cancellationToken);
+        var task = await FindUserTaskIncludingDeleted(id, cancellationToken);
         if (task is null)
         {
             return NotFound();
+        }
+        if (task.DeletedAt is not null)
+        {
+            return TaskConflict(
+                task,
+                "task_deleted",
+                "Task is deleted. Restore it before updating.");
         }
 
         var conflict = ValidateBaseUpdatedAt(task, request.BaseUpdatedAt);

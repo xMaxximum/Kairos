@@ -29,6 +29,7 @@ data class Todo(
     val updatedAt: Long = timestamp,
     val deletedAt: Long? = null,
     val lastSyncedAt: Long? = null,
+    val baseSnapshotJson: String? = null,
     @ColumnInfo(defaultValue = "'DIRTY'")
     val syncStatus: String = SyncStatus.DIRTY.name,
     val reminderTime: Long? = null,
@@ -45,5 +46,6 @@ data class Todo(
 
 enum class SyncStatus {
     DIRTY,
-    SYNCED
+    SYNCED,
+    CONFLICT
 }

@@ -15,6 +15,10 @@ interface CreateTaskInput {
   isOneOffTask?: boolean
 }
 
+type TaskMutationResult =
+  | { type: 'updated'; task: TaskItem }
+  | { type: 'deleted'; task: TaskItem }
+
 export const useTasksStore = defineStore('tasks', () => {
   const auth = useAuthStore()
   const tasks = ref<TaskItem[]>([])
@@ -140,20 +144,48 @@ export const useTasksStore = defineStore('tasks', () => {
       }
     })
     upsertLocal(updated)
+    return updated
   }
 
-  async function toggleComplete(task: TaskItem) {
-    await patchTask(task, { isCompleted: !task.isCompleted })
+  async function toggleComplete(task: TaskItem): Promise<TaskMutationResult> {
+    if (!task.isCompleted && task.isOneOffTask && task.recurrence === 'NONE') {
+      const completed = await patchTask(task, { isCompleted: true })
+      const deleted = await deleteTask(completed)
+      return { type: 'deleted', task: deleted }
+    }
+    const updated = await patchTask(task, { isCompleted: !task.isCompleted })
+    return { type: 'updated', task: updated }
   }
 
   async function archiveTask(task: TaskItem) {
-    await patchTask(task, { isArchived: !task.isArchived })
+    return await patchTask(task, { isArchived: !task.isArchived })
   }
 
   async function deleteTask(task: TaskItem) {
-    await auth.authFetch(`/tasks/${task.id}?baseUpdatedAt=${encodeURIComponent(task.updatedAt)}`, { method: 'DELETE' })
-    tasks.value = tasks.value.filter((item) => item.id !== task.id)
-    persist()
+    const deleted = await auth.authFetch<TaskItem>(`/tasks/${task.id}?baseUpdatedAt=${encodeURIComponent(task.updatedAt)}`, { method: 'DELETE' })
+    upsertLocal(deleted)
+    return deleted
+  }
+
+  async function restoreTask(task: TaskItem) {
+    const restored = await auth.authFetch<TaskItem>(`/tasks/client/${task.clientId}/restore`, {
+      method: 'POST',
+      body: {
+        title: task.title,
+        description: task.description,
+        reminderTime: task.reminderTime,
+        recurrence: task.recurrence,
+        isHighPriority: task.isHighPriority,
+        isFullScreenReminder: task.isFullScreenReminder,
+        attachments: task.attachments,
+        isCompleted: task.isCompleted,
+        isArchived: task.isArchived,
+        isOneOffTask: task.isOneOffTask,
+        baseUpdatedAt: task.updatedAt
+      }
+    })
+    upsertLocal(restored)
+    return restored
   }
 
   function upsertLocal(task: TaskItem) {
@@ -183,7 +215,8 @@ export const useTasksStore = defineStore('tasks', () => {
     patchTask,
     toggleComplete,
     archiveTask,
-    deleteTask
+    deleteTask,
+    restoreTask
   }
 })
 
